@@ -1,11 +1,11 @@
 # TradeGuard AI - Backend
 
-Backend API server cho he thong ho tro dung lo va chot loi nhuan tang cuong AI, phuc vu nha dau tu chung khoan Viet Nam.
+Backend API server cho hệ thống hỗ trợ dừng lỗ và chốt lợi nhuận tăng cường AI, phục vụ nhà đầu tư chứng khoán Việt Nam.
 
-He thong gom 2 module chinh: Portfolio Management (quan ly danh muc that) va Paper Trading (mo phong giao dich). Tich hop Google Gemini AI de tu van stop loss, take profit, canh bao rui ro va ho tro ra quyet dinh.
+Hệ thống gồm 2 module chính: Portfolio Management (quản lý danh mục thật) và Paper Trading (mô phỏng giao dịch). Tích hợp Google Gemini AI để tư vấn stop loss, take profit, cảnh báo rủi ro và hỗ trợ ra quyết định.
 
 
-## Cong nghe
+## Công nghệ
 
 - **Runtime:** Node.js (ES Modules)
 - **Framework:** Express.js
@@ -17,44 +17,44 @@ He thong gom 2 module chinh: Portfolio Management (quan ly danh muc that) va Pap
 - **Testing:** Vitest
 
 
-## Cau truc thu muc
+## Cấu trúc thư mục
 
 ```
 ai-stoploss-engine-be/
 ├── index.js                    # Entry point - Express server + Socket.IO
 ├── config/
 │   ├── database.js             # PostgreSQL connection pool
-│   └── constants.js            # Hang so ung dung
+│   └── constants.js            # Hằng số ứng dụng
 ├── middleware/
-│   ├── auth.js                 # Xac thuc JWT
-│   ├── errorHandler.js         # Xu ly loi tap trung
-│   └── validation.js           # Validation request voi Joi
+│   ├── auth.js                 # Xác thực JWT
+│   ├── errorHandler.js         # Xử lý lỗi tập trung
+│   └── validation.js           # Validation request với Joi
 ├── migrations/
-│   ├── schema.sql              # Schema chinh
-│   └── 003-009_*.sql           # Cac migration bo sung
+│   ├── schema.sql              # Schema chính
+│   └── 003-009_*.sql           # Các migration bổ sung
 ├── models/
-│   ├── User.js                 # Nguoi dung
-│   ├── Portfolio.js            # Danh muc dau tu
-│   ├── Position.js             # Vi the giao dich
-│   ├── Order.js                # Lenh giao dich
-│   ├── Notification.js         # Thong bao
-│   ├── AiRecommendation.js     # Khuyen nghi AI
-│   └── ExecutionLog.js         # Log thuc thi
+│   ├── User.js                 # Người dùng
+│   ├── Portfolio.js            # Danh mục đầu tư
+│   ├── Position.js             # Vị thế giao dịch
+│   ├── Order.js                # Lệnh giao dịch
+│   ├── Notification.js         # Thông báo
+│   ├── AiRecommendation.js     # Khuyến nghị AI
+│   └── ExecutionLog.js         # Log thực thi
 ├── routes/
-│   ├── index.js                # Mount tat ca routes
-│   ├── auth.routes.js          # Dang nhap, dang ky
-│   ├── portfolio.routes.js     # CRUD danh muc + vi the + lenh
-│   ├── market.routes.js        # Du lieu thi truong VPBS
-│   ├── ai.routes.js            # Phan tich AI, khuyen nghi
-│   ├── orders.routes.js        # Quan ly lenh
-│   ├── notifications.routes.js # Thong bao
-│   ├── watchlist.routes.js     # Danh sach theo doi
-│   └── priceAlerts.routes.js   # Canh bao gia
+│   ├── index.js                # Mount tất cả routes
+│   ├── auth.routes.js          # Đăng nhập, đăng ký
+│   ├── portfolio.routes.js     # CRUD danh mục + vị thế + lệnh
+│   ├── market.routes.js        # Dữ liệu thị trường VPBS
+│   ├── ai.routes.js            # Phân tích AI, khuyến nghị
+│   ├── orders.routes.js        # Quản lý lệnh
+│   ├── notifications.routes.js # Thông báo
+│   ├── watchlist.routes.js     # Danh sách theo dõi
+│   └── priceAlerts.routes.js   # Cảnh báo giá
 ├── controllers/
-│   ├── auth.controller.js      # Xu ly dang nhap/dang ky
-│   ├── portfolio.controller.js # Xu ly danh muc
-│   ├── market.controller.js    # Xu ly du lieu thi truong
-│   ├── ai.controller.js        # Xu ly phan tich AI
+│   ├── auth.controller.js      # Xử lý đăng nhập/đăng ký
+│   ├── portfolio.controller.js # Xử lý danh mục
+│   ├── market.controller.js    # Xử lý dữ liệu thị trường
+│   ├── ai.controller.js        # Xử lý phân tích AI
 │   ├── paper/                  # Paper trading controllers
 │   │   ├── paperPosition.controller.js
 │   │   ├── paperOrder.controller.js
@@ -64,71 +64,71 @@ ai-stoploss-engine-be/
 │       ├── realPosition.controller.js
 │       └── portfolioSummary.controller.js
 ├── services/
-│   ├── aiService.js            # Tich hop Google Gemini
-│   ├── stopLossResolver.js     # Quyet dinh dong vi the (SL/TP)
-│   ├── priceAlertMonitor.js    # Giam sat canh bao gia
-│   ├── cafefNewsService.js     # Tin tuc tu CafeF
-│   ├── marketNewsService.js    # Tin tuc thi truong
-│   ├── ai/                     # Cac service AI chuyen biet
-│   │   ├── dynamicStopLoss.js      # Stop loss dong theo volatility
-│   │   ├── capitalAllocation.js     # Phan bo von toi uu
-│   │   ├── rebalancingSuggestion.js # Tai can bang danh muc
-│   │   ├── monteCarloService.js     # Mo phong Monte Carlo
+│   ├── aiService.js            # Tích hợp Google Gemini
+│   ├── stopLossResolver.js     # Quyết định đóng vị thế (SL/TP)
+│   ├── priceAlertMonitor.js    # Giám sát cảnh báo giá
+│   ├── cafefNewsService.js     # Tin tức từ CafeF
+│   ├── marketNewsService.js    # Tin tức thị trường
+│   ├── ai/                     # Các service AI chuyên biệt
+│   │   ├── dynamicStopLoss.js      # Stop loss động theo volatility
+│   │   ├── capitalAllocation.js     # Phân bổ vốn tối ưu
+│   │   ├── rebalancingSuggestion.js # Tái cân bằng danh mục
+│   │   ├── monteCarloService.js     # Mô phỏng Monte Carlo
 │   │   ├── varService.js            # Value at Risk
-│   │   ├── stressTestService.js     # Stress test danh muc
-│   │   ├── probabilityTP.js         # Xac suat chot loi
-│   │   ├── sectorClassification.js  # Phan loai nganh
-│   │   ├── sectorConcentration.js   # Tap trung nganh
-│   │   ├── regimeDetector.js        # Nhan dien xu huong thi truong
-│   │   └── indicatorCache.js        # Cache chi bao ky thuat
+│   │   ├── stressTestService.js     # Stress test danh mục
+│   │   ├── probabilityTP.js         # Xác suất chốt lời
+│   │   ├── sectorClassification.js  # Phân loại ngành
+│   │   ├── sectorConcentration.js   # Tập trung ngành
+│   │   ├── regimeDetector.js        # Nhận diện xu hướng thị trường
+│   │   └── indicatorCache.js        # Cache chỉ báo kỹ thuật
 │   ├── paper/                  # Paper trading services
-│   │   ├── fillEngine.js           # Khop lenh paper
-│   │   ├── paperMatchingEngine.js   # So khop gia
-│   │   ├── paperCapitalService.js   # Quan ly von paper
-│   │   └── paperPerformanceService.js # Bao cao hieu suat
+│   │   ├── fillEngine.js           # Khớp lệnh paper
+│   │   ├── paperMatchingEngine.js   # So khớp giá
+│   │   ├── paperCapitalService.js   # Quản lý vốn paper
+│   │   └── paperPerformanceService.js # Báo cáo hiệu suất
 │   ├── portfolio/              # Portfolio services
-│   │   ├── capitalService.js       # Quan ly von that
-│   │   ├── realOrderService.js     # Xu ly lenh that
-│   │   └── realPositionService.js  # Xu ly vi the that
-│   └── shared/                 # Services dung chung
+│   │   ├── capitalService.js       # Quản lý vốn thật
+│   │   ├── realOrderService.js     # Xử lý lệnh thật
+│   │   └── realPositionService.js  # Xử lý vị thế thật
+│   └── shared/                 # Services dùng chung
 │       ├── websocket.js            # WebSocket broadcast
-│       ├── marketPriceService.js   # Lay gia tu VPBS
-│       ├── riskCalculator.js       # Tinh rui ro vi the
-│       ├── feeEngine.js            # Tinh phi giao dich
-│       ├── tickSizeEngine.js       # Buoc gia theo san
-│       ├── slippageCalculator.js   # Tinh truot gia
-│       ├── notificationService.js  # Gui thong bao
-│       └── priceBandValidator.js   # Kiem tra bien do gia
+│       ├── marketPriceService.js   # Lấy giá từ VPBS
+│       ├── riskCalculator.js       # Tính rủi ro vị thế
+│       ├── feeEngine.js            # Tính phí giao dịch
+│       ├── tickSizeEngine.js       # Bước giá theo sàn
+│       ├── slippageCalculator.js   # Tính trượt giá
+│       ├── notificationService.js  # Gửi thông báo
+│       └── priceBandValidator.js   # Kiểm tra biên độ giá
 ├── workers/
-│   ├── stopLossMonitor.js      # Giam sat SL/TP (chay moi 2 phut)
-│   ├── paperFillWorker.js      # Kiem tra khop lenh paper
-│   └── settlementWorker.js     # Xu ly thanh toan T+2
+│   ├── stopLossMonitor.js      # Giám sát SL/TP (chạy mỗi 2 phút)
+│   ├── paperFillWorker.js      # Kiểm tra khớp lệnh paper
+│   └── settlementWorker.js     # Xử lý thanh toán T+2
 ├── scripts/
-│   ├── migrate.js              # Chay migration
-│   ├── seed.js                 # Tao du lieu mau
-│   └── ...                     # Cac script tien ich khac
+│   ├── migrate.js              # Chạy migration
+│   ├── seed.js                 # Tạo dữ liệu mẫu
+│   └── ...                     # Các script tiện ích khác
 └── tests/                      # Unit tests (Vitest)
     ├── helpers/
     └── services/
 ```
 
 
-## Cai dat
+## Cài đặt
 
-### Yeu cau
+### Yêu cầu
 
 - Node.js v18+
 - PostgreSQL 12+
 
-### Cac buoc
+### Các bước
 
-1. Cai dat dependencies:
+1. Cài đặt dependencies:
 
 ```bash
 npm install
 ```
 
-2. Tao file `.env` tu mau:
+2. Tạo file `.env` từ mẫu:
 
 ```
 NODE_ENV=development
@@ -151,149 +151,149 @@ CORS_ORIGIN=http://localhost:5173
 LOG_LEVEL=info
 ```
 
-3. Chay migration:
+3. Chạy migration:
 
 ```bash
 npm run migrate
 ```
 
-4. (Tuy chon) Tao du lieu mau:
+4. (Tùy chọn) Tạo dữ liệu mẫu:
 
 ```bash
 npm run seed
 ```
 
-5. Khoi dong server:
+5. Khởi động server:
 
 ```bash
 npm run dev
 ```
 
-Server chay tai `http://localhost:3000`.
+Server chạy tại `http://localhost:3000`.
 
 
 ## API Endpoints
 
 ### Authentication
 
-| Method | Endpoint | Mo ta |
+| Method | Endpoint | Mô tả |
 |--------|----------|-------|
-| POST | /api/auth/register | Dang ky tai khoan |
-| POST | /api/auth/login | Dang nhap |
+| POST | /api/auth/register | Đăng ký tài khoản |
+| POST | /api/auth/login | Đăng nhập |
 
 ### Portfolio
 
-| Method | Endpoint | Mo ta |
+| Method | Endpoint | Mô tả |
 |--------|----------|-------|
-| GET | /api/portfolios | Lay danh sach danh muc |
-| POST | /api/portfolios | Tao danh muc moi |
-| GET | /api/portfolios/:id | Chi tiet danh muc |
-| PUT | /api/portfolios/:id | Cap nhat danh muc |
-| DELETE | /api/portfolios/:id | Xoa danh muc |
-| GET | /api/portfolios/:id/positions | Lay vi the trong danh muc |
-| POST | /api/portfolios/:id/positions | Tao vi the moi |
-| GET | /api/portfolios/:id/orders | Lay lenh trong danh muc |
-| POST | /api/portfolios/:id/orders | Dat lenh moi |
-| GET | /api/portfolios/:id/summary | Tong quan danh muc |
+| GET | /api/portfolios | Lấy danh sách danh mục |
+| POST | /api/portfolios | Tạo danh mục mới |
+| GET | /api/portfolios/:id | Chi tiết danh mục |
+| PUT | /api/portfolios/:id | Cập nhật danh mục |
+| DELETE | /api/portfolios/:id | Xóa danh mục |
+| GET | /api/portfolios/:id/positions | Lấy vị thế trong danh mục |
+| POST | /api/portfolios/:id/positions | Tạo vị thế mới |
+| GET | /api/portfolios/:id/orders | Lấy lệnh trong danh mục |
+| POST | /api/portfolios/:id/orders | Đặt lệnh mới |
+| GET | /api/portfolios/:id/summary | Tổng quan danh mục |
 
 ### Market Data
 
-| Method | Endpoint | Mo ta |
+| Method | Endpoint | Mô tả |
 |--------|----------|-------|
-| GET | /api/market/price/:symbol | Gia hien tai tu VPBS |
-| GET | /api/market/chart/:symbol | Du lieu bieu do OHLCV |
-| GET | /api/market/company/:symbol | Thong tin cong ty |
-| GET | /api/market/intraday/:symbol | Lich su khop lenh trong ngay |
-| GET | /api/market/news | Tin tuc thi truong |
+| GET | /api/market/price/:symbol | Giá hiện tại từ VPBS |
+| GET | /api/market/chart/:symbol | Dữ liệu biểu đồ OHLCV |
+| GET | /api/market/company/:symbol | Thông tin công ty |
+| GET | /api/market/intraday/:symbol | Lịch sử khớp lệnh trong ngày |
+| GET | /api/market/news | Tin tức thị trường |
 
 ### AI Analysis
 
-| Method | Endpoint | Mo ta |
+| Method | Endpoint | Mô tả |
 |--------|----------|-------|
-| POST | /api/ai/analyze-position | Phan tich vi the |
-| POST | /api/ai/stop-loss | Tinh stop loss dong |
-| POST | /api/ai/capital-allocation | Phan bo von toi uu |
-| POST | /api/ai/rebalancing | Goi y tai can bang |
-| POST | /api/ai/monte-carlo | Mo phong Monte Carlo |
-| POST | /api/ai/var | Tinh Value at Risk |
-| POST | /api/ai/stress-test | Stress test danh muc |
+| POST | /api/ai/analyze-position | Phân tích vị thế |
+| POST | /api/ai/stop-loss | Tính stop loss động |
+| POST | /api/ai/capital-allocation | Phân bổ vốn tối ưu |
+| POST | /api/ai/rebalancing | Gợi ý tái cân bằng |
+| POST | /api/ai/monte-carlo | Mô phỏng Monte Carlo |
+| POST | /api/ai/var | Tính Value at Risk |
+| POST | /api/ai/stress-test | Stress test danh mục |
 
 ### Watchlist
 
-| Method | Endpoint | Mo ta |
+| Method | Endpoint | Mô tả |
 |--------|----------|-------|
-| GET | /api/watchlist | Lay danh sach theo doi |
-| POST | /api/watchlist | Them ma vao watchlist |
-| DELETE | /api/watchlist/:symbol | Xoa ma khoi watchlist |
+| GET | /api/watchlist | Lấy danh sách theo dõi |
+| POST | /api/watchlist | Thêm mã vào watchlist |
+| DELETE | /api/watchlist/:symbol | Xóa mã khỏi watchlist |
 
 ### Price Alerts
 
-| Method | Endpoint | Mo ta |
+| Method | Endpoint | Mô tả |
 |--------|----------|-------|
-| GET | /api/price-alerts | Lay danh sach canh bao |
-| POST | /api/price-alerts | Tao canh bao gia |
-| DELETE | /api/price-alerts/:id | Xoa canh bao |
+| GET | /api/price-alerts | Lấy danh sách cảnh báo |
+| POST | /api/price-alerts | Tạo cảnh báo giá |
+| DELETE | /api/price-alerts/:id | Xóa cảnh báo |
 
 ### Health Check
 
-| Method | Endpoint | Mo ta |
+| Method | Endpoint | Mô tả |
 |--------|----------|-------|
-| GET | /api/health | Kiem tra trang thai server |
+| GET | /api/health | Kiểm tra trạng thái server |
 
 
 ## Scripts
 
-| Lenh | Mo ta |
+| Lệnh | Mô tả |
 |------|-------|
-| `npm run dev` | Chay development (auto-reload) |
-| `npm start` | Chay production |
-| `npm run migrate` | Chay database migrations |
-| `npm run seed` | Tao du lieu mau |
-| `npm test` | Chay tat ca tests |
-| `npm run test:watch` | Chay tests (watch mode) |
+| `npm run dev` | Chạy development (auto-reload) |
+| `npm start` | Chạy production |
+| `npm run migrate` | Chạy database migrations |
+| `npm run seed` | Tạo dữ liệu mẫu |
+| `npm test` | Chạy tất cả tests |
+| `npm run test:watch` | Chạy tests (watch mode) |
 
 
 ## Background Workers
 
-He thong co 3 worker chay nen:
+Hệ thống có 3 worker chạy nền:
 
-- **Stop Loss Monitor** - Kiem tra cac vi the moi 2 phut, tu dong dong khi cham nguong SL/TP. Xu ly xung dot giua SL va TP, tinh truot gia.
-- **Paper Fill Worker** - Kiem tra lenh paper trading co khop voi gia thi truong khong, tu dong fill khi du dieu kien.
-- **Settlement Worker** - Xu ly thanh toan T+2 theo quy dinh san chung khoan Viet Nam.
+- **Stop Loss Monitor** - Kiểm tra các vị thế mỗi 2 phút, tự động đóng khi chạm ngưỡng SL/TP. Xử lý xung đột giữa SL và TP, tính trượt giá.
+- **Paper Fill Worker** - Kiểm tra lệnh paper trading có khớp với giá thị trường không, tự động fill khi đủ điều kiện.
+- **Settlement Worker** - Xử lý thanh toán T+2 theo quy định sàn chứng khoán Việt Nam.
 
 
 ## WebSocket Events
 
-Server phat cac su kien real-time qua Socket.IO:
+Server phát các sự kiện real-time qua Socket.IO:
 
-| Event | Mo ta |
+| Event | Mô tả |
 |-------|-------|
-| `position:updated` | Vi the duoc cap nhat (SL/TP triggered) |
-| `position:closed` | Vi the da dong |
-| `order:filled` | Lenh da khop |
-| `price:alert` | Canh bao gia dat nguong |
-| `notification:new` | Thong bao moi |
+| `position:updated` | Vị thế được cập nhật (SL/TP triggered) |
+| `position:closed` | Vị thế đã đóng |
+| `order:filled` | Lệnh đã khớp |
+| `price:alert` | Cảnh báo giá đạt ngưỡng |
+| `notification:new` | Thông báo mới |
 
 
 ## Testing
 
 ```bash
-# Chay tat ca tests
+# Chạy tất cả tests
 npm test
 
-# Chay tests va theo doi thay doi
+# Chạy tests và theo dõi thay đổi
 npm run test:watch
 ```
 
-Tests su dung Vitest, bao gom:
+Tests sử dụng Vitest, bao gồm:
 - Paper trading engine (order, fill, matching, capital, performance)
-- AI services (stop loss dong, phan bo von, VaR, Monte Carlo, stress test)
+- AI services (stop loss động, phân bổ vốn, VaR, Monte Carlo, stress test)
 - Portfolio services (order, position, settlement, summary)
 
 
-## Ghi chu
+## Ghi chú
 
-- Tat ca gia tri tien te tinh bang VND (dong).
-- Gia tu VPBS tra ve don vi nghin, he thong tu dong chuyen ve VND.
-- Buoc gia (tick size) ap dung theo quy dinh cua tung san (HOSE, HNX, UPCOM).
-- Thanh toan theo quy tac T+2 cua thi truong chung khoan Viet Nam.
+- Tất cả giá trị tiền tệ tính bằng VND (đồng).
+- Giá từ VPBS trả về đơn vị nghìn, hệ thống tự động chuyển về VND.
+- Bước giá (tick size) áp dụng theo quy định của từng sàn (HOSE, HNX, UPCOM).
+- Thanh toán theo quy tắc T+2 của thị trường chứng khoán Việt Nam.
