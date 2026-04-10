@@ -31,6 +31,10 @@ let regimeCache = { data: null, timestamp: 0 };
 const REGIME_CACHE_TTL = 15 * 60 * 1000; // 15 phút
 
 const DB_SCHEMA = process.env.DB_SCHEMA || 'financial';
+const SAFE_SCHEMA_CHECK = /^[a-z_][a-z0-9_]{0,62}$/;
+if (!SAFE_SCHEMA_CHECK.test(DB_SCHEMA)) {
+  throw new Error(`Invalid DB_SCHEMA: "${DB_SCHEMA}"`);
+}
 const VPBANK_BASE_URL = 'https://neopro.vpbanks.com.vn/neo-inv-tools/noauth/public/v1/stock';
 const VPBS_PRICE_TO_VND = 1000;
 
