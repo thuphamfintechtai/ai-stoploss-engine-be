@@ -461,6 +461,14 @@ async function checkAndClosePositions() {
 // ─── Smart alerts ─────────────────────────────────────────────────────────────
 
 const alertCache = new Map(); // positionId:type → timestamp
+const ALERT_CACHE_EXPIRY_MS = 60 * 60 * 1000; // 1 giờ
+
+function cleanupAlertCache() {
+  const now = Date.now();
+  for (const [key, timestamp] of alertCache) {
+    if (now - timestamp > ALERT_CACHE_EXPIRY_MS) alertCache.delete(key);
+  }
+}
 
 async function checkSmartAlerts() {
   if (!process.env.GEMINI_API_KEY) return;
@@ -505,6 +513,8 @@ async function checkSmartAlerts() {
         metadata: { ...alert.metadata, position_id: alert.position_id, alert_type: alert.type },
       });
     }
+    // Dọn dẹp alertCache entries quá 1 giờ
+    cleanupAlertCache();
   } catch (err) {
     console.error('[SmartAlert] Error:', err.message);
   }
