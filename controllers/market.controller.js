@@ -9,7 +9,11 @@ const VPBANK_MARKET_BASE_URL = 'https://neopro.vpbanks.com.vn/neo-inv-tools/noau
 
 // Schema chứa bảng market (ohlcv_1d, ohlcv_1m, symbols, valuation, technical_indicators).
 // Nếu bảng đã có sẵn ở schema khác (vd: public) thì set DB_MARKET_SCHEMA=public trong .env
+const SAFE_SCHEMA_RE = /^[a-z_][a-z0-9_]{0,62}$/;
 const MARKET_SCHEMA = process.env.DB_MARKET_SCHEMA || process.env.DB_SCHEMA || 'financial';
+if (!SAFE_SCHEMA_RE.test(MARKET_SCHEMA)) {
+  throw new Error(`Invalid MARKET_SCHEMA: "${MARKET_SCHEMA}"`);
+}
 
 /** Validate symbol format — chỉ chấp nhận chữ, số, dấu chấm (max 20 ký tự). */
 const SYMBOL_REGEX = /^[A-Za-z0-9.]{1,20}$/;
