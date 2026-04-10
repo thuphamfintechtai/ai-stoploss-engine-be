@@ -11,6 +11,17 @@ const VPBANK_MARKET_BASE_URL = 'https://neopro.vpbanks.com.vn/neo-inv-tools/noau
 // Nếu bảng đã có sẵn ở schema khác (vd: public) thì set DB_MARKET_SCHEMA=public trong .env
 const MARKET_SCHEMA = process.env.DB_MARKET_SCHEMA || process.env.DB_SCHEMA || 'financial';
 
+/** Validate symbol format — chỉ chấp nhận chữ, số, dấu chấm (max 20 ký tự). */
+const SYMBOL_REGEX = /^[A-Za-z0-9.]{1,20}$/;
+function validateSymbol(symbol) {
+  return symbol && SYMBOL_REGEX.test(symbol);
+}
+
+/** Encode symbol an toàn cho URL query parameter. */
+function safeSymbol(symbol) {
+  return encodeURIComponent(symbol);
+}
+
 /** Chuẩn hóa số từ API: không trả NaN, trả null nếu không hợp lệ (để FE hiển thị "--" hoặc 0). */
 function toNum(val) {
   if (val == null || val === '') return null;
@@ -179,8 +190,11 @@ export const getSymbolInfo = async (req, res, next) => {
 export const getPrice = async (req, res, next) => {
   try {
     const { symbol } = req.params;
+    if (!validateSymbol(symbol)) {
+      return res.status(400).json({ success: false, message: 'Invalid symbol format' });
+    }
 
-    const { data: json } = await fetchJson(`${VPBANK_BASE_URL}/stockAdvancedInfo?symbols=${symbol}`);
+    const { data: json } = await fetchJson(`${VPBANK_BASE_URL}/stockAdvancedInfo?symbols=${safeSymbol(symbol)}`);
 
     if (json.status !== 1 || !json.data?.[0]) {
       return res.status(404).json({
@@ -300,7 +314,7 @@ export const getOHLCV = async (req, res, next) => {
     else if (timeframe === '1M') fromTime = now - (maxLimit * 30 * 86400); // months (approx)
 
     // Fetch from VPBank API
-    const url = `${VPBANK_BASE_URL}/tradingViewChart?symbol=${symbol}&resolution=${resolution}&from=${fromTime}&to=${now}`;
+    const url = `${VPBANK_BASE_URL}/tradingViewChart?symbol=${safeSymbol(symbol)}&resolution=${resolution}&from=${fromTime}&to=${now}`;
     const { data: vpbankData } = await fetchJson(url);
 
     if (vpbankData.status !== 1 || !vpbankData.data) {
