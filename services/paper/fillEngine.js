@@ -33,6 +33,15 @@ const VPBS_TO_VND = 1000;
 // ─── Cache avgDailyVolume in-memory với TTL 1 giờ ──────────────────────────
 const volumeCache = new Map(); // key: "symbol|exchange" → { volume, expiresAt }
 const VOLUME_CACHE_TTL_MS = 60 * 60 * 1000; // 1 giờ
+const VOLUME_CACHE_MAX_SIZE = 500;
+
+// Dọn dẹp cache entries đã hết hạn
+function cleanupVolumeCache() {
+  const now = Date.now();
+  for (const [key, entry] of volumeCache) {
+    if (now >= entry.expiresAt) volumeCache.delete(key);
+  }
+}
 
 async function getCurrentPriceVnd(symbol, exchange = 'HOSE') {
   try {
@@ -86,6 +95,7 @@ async function getAvgDailyVolume(symbol, exchange = 'HOSE') {
     const totalVolume = candles.reduce((sum, c) => sum + (Number(c.volume) || 0), 0);
     const avgVolume = Math.round(totalVolume / candles.length);
 
+    if (volumeCache.size >= VOLUME_CACHE_MAX_SIZE) cleanupVolumeCache();
     volumeCache.set(cacheKey, {
       volume: avgVolume,
       expiresAt: Date.now() + VOLUME_CACHE_TTL_MS,
