@@ -1,0 +1,49 @@
+{
+  "name": "ai-stoploss-engine-be",
+  "version": "1.0.0",
+  "description": "Backend server - AI Stop Loss Engine",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "migrate": "node scripts/migrate.js",
+    "migrate:market": "node scripts/migrate-market.js",
+    "seed": "node scripts/seed.js",
+    "worker:stoploss": "node workers/stopLossMonitor.js",
+    "clear:positions": "node scripts/clear-positions.js",
+    "migrate:watchlist": "node scripts/migrate-watchlist.js",
+    "test": "vitest run --reporter=verbose",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "trading",
+    "stoploss",
+    "AI",
+    "vietnam-stocks"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "axios": "^1.6.5",
+    "bcrypt": "^5.1.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.1",
+    "express": "^4.21.0",
+    "express-rate-limit": "^7.1.5",
+    "joi": "^17.12.0",
+    "jsonwebtoken": "^9.0.2",
+    "node-cron": "^3.0.3",
+    "pg": "^8.11.5",
+    "simple-statistics": "^7.8.9",
+    "socket.io": "^4.6.1",
+    "telegraf": "^4.15.0",
+    "trading-signals": "^7.4.3",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3",
+    "vitest": "^4.1.2"
+  }
+}
