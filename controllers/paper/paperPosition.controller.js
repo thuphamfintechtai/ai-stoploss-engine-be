@@ -190,8 +190,13 @@ export const getById = async (req, res, next) => {
 };
 
 /** POST /portfolios/:portfolioId/positions */
+/**
+ * @deprecated Sử dụng POST /api/portfolios/:id/orders thay thế.
+ * Endpoint này tạo position trực tiếp mà không qua order flow (không trừ vốn, không tính phí).
+ */
 export const create = async (req, res, next) => {
   try {
+    console.warn('[DEPRECATED] paperPosition.create called — use order flow instead');
     const portfolio = await ensurePortfolioOwnership(req, res);
     if (!portfolio) return;
 
