@@ -277,6 +277,12 @@ async function closePosition(pos, candle, newStatus, slipResult, workerRunId) {
     console.error('[Worker] Notification error:', notifErr.message);
   }
 
+  // Cleanup in-memory caches cho position đã đóng
+  trailingHWM.delete(pos.id);
+  alertCache.delete(`${pos.id}:APPROACHING_SL`);
+  alertCache.delete(`${pos.id}:APPROACHING_TP`);
+  alertCache.delete(`${pos.id}:HIGH_VOLATILITY`);
+
   const pnlSign = netPnlVnd >= 0 ? '+' : '';
   console.log(
     `[Worker] ${pos.symbol} ${newStatus} @ ${slipResult.fill_price}` +
