@@ -110,7 +110,7 @@ export const createOrder = async (req, res, next) => {
     const warnings = [];
 
     // ── 1. SHORT validation ──────────────────────────────────────────────────
-    if (side === 'SELL' && !isExistingLongToSell(portfolio.id, symbol)) {
+    if (side === 'SELL' && !(await isExistingLongToSell(portfolio.id, symbol))) {
       // "SELL" để đóng LONG position là OK (xử lý ở position close flow)
       // "SELL" như short new position chỉ cho derivative
     }
@@ -519,10 +519,10 @@ export const editOrder = async (req, res, next) => {
 
 // ─── Helper function (placeholder) ───────────────────────────────────────────
 
-function isExistingLongToSell(portfolioId, symbol) {
-  // Đây là helper placeholder — việc check holdings thực tế
-  // được xử lý ở position close flow, không phải order flow
-  return true;
+async function isExistingLongToSell(portfolioId, symbol) {
+  const { default: Position } = await import('../../models/Position.js');
+  const positions = await Position.findByPortfolioId(portfolioId, { status: 'OPEN', context: 'PAPER' });
+  return positions.some(p => p.symbol === symbol && p.side === 'LONG');
 }
 
 // ─── Re-export alias for backward compat (create = createOrder) ──────────────
