@@ -1,0 +1,123 @@
+// Application constants
+
+export const EXCHANGES = {
+  HOSE: 'HOSE',
+  HNX: 'HNX',
+  UPCOM: 'UPCOM'
+};
+
+export const POSITION_STATUS = {
+  OPEN: 'OPEN',
+  CLOSED_TP: 'CLOSED_TP',
+  CLOSED_SL: 'CLOSED_SL',
+  CLOSED_MANUAL: 'CLOSED_MANUAL'
+};
+
+export const STOP_TYPE = {
+  FIXED: 'FIXED',
+  PERCENT: 'PERCENT',
+  MAX_LOSS: 'MAX_LOSS',
+  TRAILING: 'TRAILING',
+  ATR: 'ATR',
+  MA: 'MA',
+  SUPPORT_RESISTANCE: 'SUPPORT_RESISTANCE'
+};
+
+export const TAKE_PROFIT_TYPE = {
+  FIXED: 'FIXED',
+  PERCENT: 'PERCENT',
+  R_RATIO: 'R_RATIO'
+};
+
+export const ORDER_TYPE = {
+  OPEN: 'OPEN',
+  CLOSE_TP: 'CLOSE_TP',
+  CLOSE_SL: 'CLOSE_SL',
+  CLOSE_MANUAL: 'CLOSE_MANUAL',
+  PARTIAL_CLOSE: 'PARTIAL_CLOSE'
+};
+
+export const SIGNAL_ACTION = {
+  BUY: 'BUY',
+  SELL: 'SELL'
+};
+
+export const SOURCE_TYPE = {
+  AI_GENERATED: 'AI_GENERATED',
+  TRADINGVIEW: 'TRADINGVIEW',
+  TELEGRAM: 'TELEGRAM',
+  USER_TRADER: 'USER_TRADER',
+  MANUAL: 'MANUAL'
+};
+
+export const AI_VERDICT = {
+  RECOMMENDED: 'RECOMMENDED',
+  CAUTION: 'CAUTION',
+  AVOID: 'AVOID',
+  NEUTRAL: 'NEUTRAL'
+};
+
+export const NOTIFICATION_TYPE = {
+  SL_TRIGGERED: 'SL_TRIGGERED',
+  TP_TRIGGERED: 'TP_TRIGGERED',
+  RISK_WARNING: 'RISK_WARNING',
+  NEW_SIGNAL: 'NEW_SIGNAL',
+  POSITION_OPENED: 'POSITION_OPENED',
+  POSITION_CLOSED: 'POSITION_CLOSED',
+  SIGNAL_EXPIRED: 'SIGNAL_EXPIRED',
+  PORTFOLIO_UPDATE: 'PORTFOLIO_UPDATE',
+  SYSTEM: 'SYSTEM',
+  AI_ALERT: 'AI_ALERT'
+};
+
+export const NOTIFICATION_SEVERITY = {
+  INFO: 'INFO',
+  WARNING: 'WARNING',
+  ERROR: 'ERROR',
+  SUCCESS: 'SUCCESS'
+};
+
+export const TIMEFRAMES = {
+  '1m': '1m',
+  '5m': '5m',
+  '15m': '15m',
+  '1h': '1h',
+  '1d': '1d'
+};
+
+// Tỷ giá VND/USD – chỉ dùng trong migration/view (cột _usd legacy). Logic ứng dụng chỉ VND.
+export const DEFAULT_EXCHANGE_RATE = 25000;
+
+// Risk management defaults
+export const DEFAULT_MAX_RISK_PERCENT = 5;
+export const RISK_WARNING_THRESHOLD = 80; // % of max risk used
+
+// API Rate limiting
+export const RATE_LIMIT = {
+  WINDOW_MS: 15 * 60 * 1000, // 15 minutes
+  MAX_REQUESTS: 100
+};
+
+// Pagination defaults
+export const DEFAULT_PAGE_SIZE = 20;
+export const MAX_PAGE_SIZE = 100;
+
+export default {
+  EXCHANGES,
+  POSITION_STATUS,
+  STOP_TYPE,
+  TAKE_PROFIT_TYPE,
+  ORDER_TYPE,
+  SIGNAL_ACTION,
+  SOURCE_TYPE,
+  AI_VERDICT,
+  NOTIFICATION_TYPE,
+  NOTIFICATION_SEVERITY,
+  TIMEFRAMES,
+  DEFAULT_EXCHANGE_RATE,
+  DEFAULT_MAX_RISK_PERCENT,
+  RISK_WARNING_THRESHOLD,
+  RATE_LIMIT,
+  DEFAULT_PAGE_SIZE,
+  MAX_PAGE_SIZE
+};
