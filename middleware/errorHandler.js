@@ -17,19 +17,19 @@ export const errorHandler = (err, req, res, next) => {
   if (err.code) {
     // PostgreSQL unique violation
     if (err.code === '23505') {
+      console.error('Unique violation:', err.detail);
       return res.status(409).json({
         success: false,
-        message: 'Record already exists',
-        error: err.detail
+        message: 'Record already exists'
       });
     }
 
     // PostgreSQL foreign key violation
     if (err.code === '23503') {
+      console.error('Foreign key violation:', err.detail);
       return res.status(400).json({
         success: false,
-        message: 'Invalid reference',
-        error: err.detail
+        message: 'Invalid reference'
       });
     }
   }
