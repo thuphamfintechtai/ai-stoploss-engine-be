@@ -58,6 +58,12 @@ app.use(notFound);
 app.use(errorHandler);
 
 async function startServer() {
+  // Validate critical environment variables
+  if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
+    console.error('FATAL: JWT_SECRET phải được cấu hình và có ít nhất 32 ký tự');
+    process.exit(1);
+  }
+
   try {
     console.log('🔌 Connecting to database...');
     const dbConnected = await testConnection();

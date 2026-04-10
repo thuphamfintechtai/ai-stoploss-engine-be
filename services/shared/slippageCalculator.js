@@ -39,7 +39,7 @@ export function calcLongSLSlippage(candle, stopLoss, qty) {
     // Nếu giá đóng nến trên SL (nến chạm rồi bounce) → fill tại SL
     // Nếu giá đóng nến dưới SL → fill tại close (sát thực tế hơn)
     fill_price = candle.close >= stopLoss ? stopLoss : candle.close;
-    slippage_reason = fill_price < stopLoss ? 'NORMAL' : 'NORMAL';
+    slippage_reason = 'NORMAL';
   }
 
   const slippage_vnd = (stopLoss - fill_price) * qty; // dương = bất lợi

@@ -34,9 +34,9 @@ const DEFAULT_SELL_TAX_PCT = 0.0010; // 0.10%
  * }}
  */
 export function calculateFees(entryVnd, closeVnd, qty, portfolio = {}) {
-  const buyPct  = Number(portfolio.buy_fee_percent)  || DEFAULT_BUY_FEE_PCT;
-  const sellPct = Number(portfolio.sell_fee_percent) || DEFAULT_SELL_FEE_PCT;
-  const taxPct  = Number(portfolio.sell_tax_percent) || DEFAULT_SELL_TAX_PCT;
+  const buyPct  = portfolio.buy_fee_percent  != null ? Number(portfolio.buy_fee_percent)  : DEFAULT_BUY_FEE_PCT;
+  const sellPct = portfolio.sell_fee_percent != null ? Number(portfolio.sell_fee_percent) : DEFAULT_SELL_FEE_PCT;
+  const taxPct  = portfolio.sell_tax_percent != null ? Number(portfolio.sell_tax_percent) : DEFAULT_SELL_TAX_PCT;
 
   const buyValue  = entryVnd * qty;
   const sellValue = closeVnd * qty;
@@ -63,7 +63,7 @@ export function calculateFees(entryVnd, closeVnd, qty, portfolio = {}) {
  * Tính buy_fee khi mở position (lưu vào position record ngay khi tạo).
  */
 export function calculateBuyFee(entryVnd, qty, portfolio = {}) {
-  const buyPct = Number(portfolio.buy_fee_percent) || DEFAULT_BUY_FEE_PCT;
+  const buyPct = portfolio.buy_fee_percent != null ? Number(portfolio.buy_fee_percent) : DEFAULT_BUY_FEE_PCT;
   return Math.round(entryVnd * qty * buyPct);
 }
 
@@ -71,9 +71,9 @@ export function calculateBuyFee(entryVnd, qty, portfolio = {}) {
  * Tính break-even price: giá cần bán tối thiểu để không lỗ (sau phí).
  */
 export function calculateBreakEven(entryVnd, qty, portfolio = {}) {
-  const buyPct  = Number(portfolio.buy_fee_percent)  || DEFAULT_BUY_FEE_PCT;
-  const sellPct = Number(portfolio.sell_fee_percent) || DEFAULT_SELL_FEE_PCT;
-  const taxPct  = Number(portfolio.sell_tax_percent) || DEFAULT_SELL_TAX_PCT;
+  const buyPct  = portfolio.buy_fee_percent  != null ? Number(portfolio.buy_fee_percent)  : DEFAULT_BUY_FEE_PCT;
+  const sellPct = portfolio.sell_fee_percent != null ? Number(portfolio.sell_fee_percent) : DEFAULT_SELL_FEE_PCT;
+  const taxPct  = portfolio.sell_tax_percent != null ? Number(portfolio.sell_tax_percent) : DEFAULT_SELL_TAX_PCT;
 
   const buyFee = entryVnd * qty * buyPct;
   // Phương trình: (breakEven - entryVnd) * qty = buyFee + breakEven * qty * (sellPct + taxPct)

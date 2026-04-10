@@ -48,10 +48,10 @@ export const authenticateToken = async (req, res, next) => {
       });
     }
 
+    console.error('Auth middleware error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Authentication error',
-      error: error.message
+      message: 'Authentication error'
     });
   }
 };

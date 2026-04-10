@@ -89,9 +89,23 @@ export function initializeWebSocket(httpServer) {
       socket.join(`user:${socket.userId}`);
     }
 
-    socket.on('subscribe_portfolio', (portfolioId) => {
-      if (portfolioId) socket.join(`portfolio:${portfolioId}`);
-      socket.emit('subscribed', { type: 'portfolio', id: portfolioId });
+    socket.on('subscribe_portfolio', async (portfolioId) => {
+      if (!portfolioId || !socket.userId) {
+        socket.emit('error', { message: 'Cần xác thực để subscribe portfolio' });
+        return;
+      }
+      try {
+        const { default: Portfolio } = await import('../../models/Portfolio.js');
+        const portfolio = await Portfolio.findById(portfolioId);
+        if (!portfolio || String(portfolio.user_id) !== String(socket.userId)) {
+          socket.emit('error', { message: 'Không có quyền truy cập portfolio này' });
+          return;
+        }
+        socket.join(`portfolio:${portfolioId}`);
+        socket.emit('subscribed', { type: 'portfolio', id: portfolioId });
+      } catch (err) {
+        socket.emit('error', { message: 'Subscription thất bại' });
+      }
     });
     socket.on('unsubscribe_portfolio', (portfolioId) => {
       if (portfolioId) socket.leave(`portfolio:${portfolioId}`);

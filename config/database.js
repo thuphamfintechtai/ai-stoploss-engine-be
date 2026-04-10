@@ -20,9 +20,18 @@ const pool = new Pool({
   keepAliveInitialDelayMillis: 10000
 });
 
-// Set default schema
+// Validate and set default schema
+const SAFE_SCHEMA = /^[a-z_][a-z0-9_]{0,62}$/;
+const dbSchema = process.env.DB_SCHEMA || 'financial';
+if (!SAFE_SCHEMA.test(dbSchema)) {
+  console.error(`FATAL: Invalid DB_SCHEMA: "${dbSchema}". Must be a valid PostgreSQL identifier.`);
+  process.exit(1);
+}
+
 pool.on('connect', (client) => {
-  client.query(`SET search_path TO ${process.env.DB_SCHEMA || 'financial'}, public`);
+  client.query(`SET search_path TO ${dbSchema}, public`).catch(err => {
+    console.error('Failed to set search_path:', err.message);
+  });
 });
 
 // Error handler – chỉ log, không thoát process (pool sẽ loại client lỗi và tạo kết nối mới khi cần)
