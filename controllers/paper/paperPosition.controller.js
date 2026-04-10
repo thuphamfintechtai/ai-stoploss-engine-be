@@ -20,7 +20,7 @@ import Portfolio from '../../models/Portfolio.js';
 import RiskCalculator from '../../services/riskCalculator.js';
 import stopLossResolver from '../../services/stopLossResolver.js';
 import { getMarketData } from '../../services/marketPriceService.js';
-import { calculateFees } from '../../services/feeEngine.js';
+import { calculateFees } from '../../services/shared/feeEngine.js';
 import ExecutionLog from '../../models/ExecutionLog.js';
 import { isDerivativeSymbol } from '../../services/tickSizeEngine.js';
 import Joi from 'joi';
