@@ -5,6 +5,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { validateAiResponse } from './ai/aiResponseSchemas.js';
 import { snapAndClampPrices, snapAndClampReview } from './ai/aiPostProcess.js';
+import { generateFallbackSignal, generateFallbackSLTP } from './ai/fallbackSuggestor.js';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
@@ -701,6 +702,7 @@ Trả về JSON tín hiệu giao dịch (không có markdown fence):
   "expiry_hours": <số giờ tín hiệu còn hiệu lực, 4-72>
 }`;
 
+  const signalStart = Date.now();
   try {
     // generateSignal: validate + snap/clamp entry/SL/TP với currentPrice là reference.
     const result = await callGeminiJSONValidated(prompt, 'signal', {
@@ -710,13 +712,11 @@ Trả về JSON tín hiệu giao dịch (không có markdown fence):
     });
     return { ...result, ai_source: 'gemini' };
   } catch (_err) {
-    console.warn('[AI] generateSignal Gemini fallback:', _err.message);
-    return {
-      recommendation: 'HOLD',
-      confidence: 0.5,
-      reasoning: 'Phân tích tự động không khả dụng. Vui lòng kiểm tra lại sau.',
-      ai_source: 'rule-based',
-    };
+    // AIT-07 (D-07): Gemini fail → rule-based fallback match signalSchema.
+    // Shape cũ { recommendation, confidence, reasoning } KHÔNG match schema → FE crash (T-04-08).
+    const latencyMs = Date.now() - signalStart;
+    console.warn(`[AI fallback] ${symbol} generateSignal — Gemini: ${_err.message}. latency=${latencyMs}ms. Returning rule-based signal.`);
+    return generateFallbackSignal({ symbol, exchange, currentPrice, ohlcvData });
   }
 }
 
