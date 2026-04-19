@@ -6,23 +6,80 @@
  *
  * NOTE: CapitalService (cash deduction) sẽ được wire vào đây bởi Plan 06.
  * Controller này CHỈ làm: validate → ownership → service call → response.
+ *
+ * Phase 2 (VN market rules enforcement):
+ * - Joi schema wire validateLotSize + isValidTick từ vnMarketRules (server authority).
+ * - Handler body lookup reference_price từ DB (marketPriceService.getMarketData) → validatePriceInBand.
+ * - KHÔNG accept `reference_price` từ client body (policy LOCKED — không trust client).
+ * - KHÔNG dùng `isMarketOpen` để block order create (app là trade-logging, lệnh đã khớp trên broker).
+ * - Graceful degrade: nếu DB không có reference_price → skip band check + log warning.
  */
 
 import Joi from 'joi';
 import Portfolio from '../../models/Portfolio.js';
 import RealOrderService from '../../services/portfolio/realOrderService.js';
+import {
+  validateLotSize,
+  isValidTick,
+  getTickSize,
+  validatePriceInBand,
+  ERRORS,
+} from '../../services/shared/vnMarketRules.js';
+import { getMarketData } from '../../services/shared/marketPriceService.js';
 // KHONG import CapitalService -- Plan 06 se wire cash deduction vao day
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Lookup reference_price (VND) từ DB/market data cho band validation.
+ * F0 graceful degrade: return null nếu không có → caller SKIP band check.
+ * @param {string} symbol
+ * @returns {Promise<number|null>}
+ */
+async function lookupReferencePriceVnd(symbol) {
+  try {
+    const info = await getMarketData(symbol);
+    const ref = Number(info?.reference);
+    return Number.isFinite(ref) && ref > 0 ? ref : null;
+  } catch (e) {
+    console.warn('[order] reference_price lookup error for', symbol, '-', e?.message);
+    return null;
+  }
+}
 
 // ─── Validation Schema ────────────────────────────────────────────────────────
 
 export const createRealOrderSchema = Joi.object({
-  symbol:       Joi.string().max(20).uppercase().required(),
-  exchange:     Joi.string().valid('HOSE', 'HNX', 'UPCOM').required(),
-  side:         Joi.string().valid('BUY', 'SELL').required(),
-  quantity:     Joi.number().integer().positive().required(),
-  filled_price: Joi.number().positive().required(),
-  filled_date:  Joi.date().iso().required(),
-  notes:        Joi.string().max(500).optional().allow('', null),
+  symbol:   Joi.string().max(20).uppercase().required(),
+  exchange: Joi.string().valid('HOSE', 'HNX', 'UPCOM').required(),
+  side:     Joi.string().valid('BUY', 'SELL').required(),
+
+  // Lot size validate theo sàn sibling — pattern tested: helpers.error('any.invalid', {message})
+  quantity: Joi.number().integer().positive().required()
+    .custom((value, helpers) => {
+      const exchange = helpers.state.ancestors[0]?.exchange || 'HOSE';
+      const r = validateLotSize(value, exchange);
+      if (r.ok) return value;
+      return helpers.error('any.invalid', { message: r.reason });
+    }, 'vn-lot-size')
+    .messages({ 'any.invalid': '{#message}' }),
+
+  // Tick validate theo sàn sibling
+  filled_price: Joi.number().positive().required()
+    .custom((value, helpers) => {
+      const exchange = helpers.state.ancestors[0]?.exchange || 'HOSE';
+      if (isValidTick(value, exchange)) return value;
+      const tick = getTickSize(value, exchange);
+      return helpers.error('any.invalid', {
+        message: ERRORS.TICK_INVALID(tick, exchange),
+      });
+    }, 'vn-tick-size')
+    .messages({ 'any.invalid': '{#message}' }),
+
+  filled_date: Joi.date().iso().required(),
+  notes:       Joi.string().max(500).optional().allow('', null),
+  // NOTE: reference_price KHÔNG accept từ client (policy F0 — không trust client-provided).
+  // Server lookup qua marketPriceService.getMarketData ở handler body.
 });
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
@@ -61,6 +118,23 @@ export const createRealOrder = async (req, res, next) => {
       filled_date,
       notes,
     } = req.validatedBody;
+
+    // ─── Server-side band validation ────────────────────────────────────────
+    // reference_price LUÔN lookup từ DB/market data, KHÔNG trust client body.
+    // F0 graceful degrade: DB không có ref → SKIP band check + log warning.
+    // Phase 3+ sẽ enforce stricter (fail-closed khi DB ref missing).
+    const referenceVnd = await lookupReferencePriceVnd(symbol);
+    if (referenceVnd && referenceVnd > 0) {
+      const bandCheck = validatePriceInBand(filled_price, exchange, referenceVnd);
+      if (!bandCheck.ok) {
+        return res.status(400).json({
+          success: false,
+          message: bandCheck.reason,
+        });
+      }
+    } else {
+      console.warn('[order] No reference_price for', symbol, '— band check skipped');
+    }
 
     let result;
 
