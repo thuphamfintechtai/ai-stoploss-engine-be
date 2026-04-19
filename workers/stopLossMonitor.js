@@ -22,7 +22,6 @@ import Portfolio from '../models/Portfolio.js';
 import { calculateFees } from '../services/feeEngine.js';
 import { calcLongSLSlippage, calcShortSLSlippage, calcLongTPSlippage, calcShortTPSlippage, resolveConflict } from '../services/slippageCalculator.js';
 import { createNotification, getUserIdByPortfolio } from '../services/notificationService.js';
-import { fillOrderInstant, expireEndOfSessionOrders } from '../services/fillEngine.js';
 import Order from '../models/Order.js';
 import { calculateDynamicSL, generateSLNarrative } from '../services/ai/dynamicStopLoss.js';
 import { getOrCreateIndicators, feedCandle } from '../services/ai/indicatorCache.js';
@@ -94,15 +93,6 @@ function isMarketOpen() {
   const [h, m] = t.split(':').map(Number);
   const hhmm   = h * 100 + m;
   return (hhmm >= 915 && hhmm <= 1130) || (hhmm >= 1300 && hhmm <= 1500);
-}
-
-function isClosingSession() {
-  const now = new Date();
-  const tz  = 'Asia/Ho_Chi_Minh';
-  const t   = now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz });
-  const [h, m] = t.split(':').map(Number);
-  const hhmm   = h * 100 + m;
-  return hhmm >= 1500; // sau 15:00 là cuối phiên
 }
 
 // ─── Market data helpers ──────────────────────────────────────────────────────
@@ -437,24 +427,6 @@ async function checkAndClosePositions() {
         await updateTrailingStops([pos], candle, symbol, workerRunId);
       }
     }
-
-    // Fill pending LO orders cho symbol này
-    try {
-      const pendingOrders = await Order.findPendingBySymbol(symbol);
-      for (const order of pendingOrders) {
-        if (order.exchange === exchange) {
-          await fillOrderInstant(order);
-        }
-      }
-    } catch (fillErr) {
-      console.error(`[Worker] Fill engine error for ${symbol}:`, fillErr.message);
-    }
-  }
-
-  // Cuối phiên: expire orders
-  if (isClosingSession()) {
-    const expiredCount = await expireEndOfSessionOrders();
-    if (expiredCount > 0) console.log(`[Worker] Expired ${expiredCount} orders`);
   }
 }
 
