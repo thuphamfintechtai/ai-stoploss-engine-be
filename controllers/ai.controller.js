@@ -30,6 +30,48 @@ import AiRecommendation from '../models/AiRecommendation.js';
 let regimeCache = { data: null, timestamp: 0 };
 const REGIME_CACHE_TTL = 15 * 60 * 1000; // 15 phút
 
+// ─── AI price cache 60s (AIT-03 / D-03) ───────────────────────────────────
+// Ngăn AI prompt dùng giá cũ (threat T-04-03 Information Disclosure).
+// Scope AI-only, không đụng Phase 5 marketPriceService.
+const aiPriceCache = new Map();
+const AI_PRICE_CACHE_TTL_MS = 60_000;
+
+/**
+ * Wrapper cache 60s cho fetchCurrentPriceVND.
+ * - Key = `${symbol.toUpperCase()}:${exchange}`
+ * - Cache hit nếu `Date.now() - fetchedAt < maxAgeMs`
+ * - KHÔNG cache null result (để retry lần sau)
+ *
+ * @param {string} symbol
+ * @param {string} [exchange='HOSE']
+ * @param {{maxAgeMs?: number}} [options]
+ * @returns {Promise<number|null>} Giá VND hoặc null nếu fetch fail
+ */
+export async function fetchCurrentPriceCached(symbol, exchange = 'HOSE', { maxAgeMs = AI_PRICE_CACHE_TTL_MS } = {}) {
+  const key = `${String(symbol).toUpperCase()}:${exchange}`;
+  const cached = aiPriceCache.get(key);
+  if (cached && (Date.now() - cached.fetchedAt) < maxAgeMs) {
+    return cached.price;
+  }
+  const price = await fetchCurrentPriceVND(symbol, exchange);
+  if (price != null) {
+    aiPriceCache.set(key, { price, fetchedAt: Date.now() });
+  }
+  return price;
+}
+
+// Cleanup stale entries mỗi 5 phút — xoá entry đã hết hạn > 10 phút
+const AI_PRICE_CACHE_CLEANUP = setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of aiPriceCache.entries()) {
+    if (now - v.fetchedAt > 10 * 60_000) aiPriceCache.delete(k);
+  }
+}, 5 * 60_000);
+AI_PRICE_CACHE_CLEANUP.unref?.();
+
+// Export cho test
+export { aiPriceCache as __aiPriceCache };
+
 const DB_SCHEMA = process.env.DB_SCHEMA || 'financial';
 const SAFE_SCHEMA_CHECK = /^[a-z_][a-z0-9_]{0,62}$/;
 if (!SAFE_SCHEMA_CHECK.test(DB_SCHEMA)) {
@@ -123,10 +165,10 @@ export async function suggestSLTP(req, res, next) {
 
     const { symbol, exchange, rr_ratio, side, capital, risk_percent, quantity } = value;
 
-    // Lấy giá hiện tại nếu chưa có
+    // Lấy giá hiện tại nếu chưa có — AIT-03: ép freshness nghiêm ngặt 60s cho AI analyze endpoint
     let currentPrice = value.current_price;
     if (!currentPrice) {
-      currentPrice = await fetchCurrentPriceVND(symbol, exchange);
+      currentPrice = await fetchCurrentPriceCached(symbol, exchange, { maxAgeMs: 60_000 });
       if (!currentPrice) {
         return res.status(400).json({
           success: false,
@@ -602,8 +644,9 @@ export async function analyzeWatchlistSymbol(req, res, next) {
     }
 
     // Lấy giá hiện tại và OHLCV song song (dùng helpers đã có trong file)
+    // AIT-03: dùng cache 60s mặc định
     const [currentPrice, ohlcvData] = await Promise.all([
-      fetchCurrentPriceVND(sym, exchange),
+      fetchCurrentPriceCached(sym, exchange),
       fetchOHLCV(sym, exchange, 50)   // lấy 50 nến để AI có đủ context
     ]);
 
@@ -745,13 +788,13 @@ export async function reviewPositions(req, res, next) {
       });
     }
 
-    // Lấy giá hiện tại song song cho tất cả symbols
+    // Lấy giá hiện tại song song cho tất cả symbols — AIT-03: cache 60s mặc định
     const symbols = [...new Set(positions.map(p => p.symbol))];
     const priceMap = {};
     await Promise.all(
       symbols.map(async (sym) => {
         const pos = positions.find(p => p.symbol === sym);
-        const price = await fetchCurrentPriceVND(sym, pos?.exchange || 'HOSE');
+        const price = await fetchCurrentPriceCached(sym, pos?.exchange || 'HOSE');
         if (price) priceMap[sym] = price;
       })
     );
