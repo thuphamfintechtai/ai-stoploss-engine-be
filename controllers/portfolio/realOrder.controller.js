@@ -78,8 +78,19 @@ export const createRealOrderSchema = Joi.object({
 
   filled_date: Joi.date().iso().required(),
   notes:       Joi.string().max(500).optional().allow('', null),
+  // D-05 (MAP-01): order_status ∈ {FILLED, PENDING}, default FILLED (backward-compat)
+  order_status: Joi.string().valid('FILLED', 'PENDING').default('FILLED'),
   // NOTE: reference_price KHÔNG accept từ client (policy F0 — không trust client-provided).
   // Server lookup qua marketPriceService.getMarketData ở handler body.
+});
+
+/**
+ * Schema cho POST /:portfolioId/orders/:orderId/confirm-fill.
+ * User cung cap gia fill thuc te + ngay fill khi broker khop lenh PENDING.
+ */
+export const confirmFillSchema = Joi.object({
+  actual_price: Joi.number().positive().required(),
+  actual_date:  Joi.date().iso().required(),
 });
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
@@ -117,6 +128,7 @@ export const createRealOrder = async (req, res, next) => {
       filled_price,
       filled_date,
       notes,
+      order_status,
     } = req.validatedBody;
 
     // ─── Server-side band validation ────────────────────────────────────────
@@ -140,7 +152,7 @@ export const createRealOrder = async (req, res, next) => {
 
     if (side === 'BUY') {
       // Ghi nhận lệnh mua: tạo order + position với context='REAL'
-      // NOTE: Cash deduction (CapitalService.deductForBuy) sẽ được thêm bởi Plan 06
+      // D-05 (MAP-01): order_status ∈ {FILLED, PENDING} — FILLED tru cash, PENDING lock
       result = await RealOrderService.recordBuyOrder(portfolio.id, {
         symbol,
         exchange,
@@ -148,6 +160,7 @@ export const createRealOrder = async (req, res, next) => {
         filledPrice: filled_price,
         filledDate: filled_date,
         notes,
+        orderStatus: order_status,
       });
     } else {
       // SELL side sẽ delegate sang RealPositionService.closePosition (qua realPosition.controller)
@@ -192,6 +205,62 @@ export const getTransactionHistory = async (req, res, next) => {
       data: result,
     });
   } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Confirm PENDING BUY order fill on broker.
+ * POST /api/portfolios/:portfolioId/orders/:orderId/confirm-fill
+ *
+ * D-05 (MAP-01) PENDING lifecycle:
+ *   PENDING → RECORDED, CapitalService.confirmBuyFill (lock → spent), tạo Position OPEN.
+ * T-03-04 mitigation: controller check ownership; service layer check order.portfolio_id matches.
+ */
+export const confirmOrderFill = async (req, res, next) => {
+  try {
+    const portfolio = await ensurePortfolioOwnership(req, res);
+    if (!portfolio) return;
+
+    const { orderId } = req.params;
+    const { actual_price, actual_date } = req.validatedBody;
+
+    const result = await RealOrderService.confirmOrderFill(portfolio.id, orderId, {
+      actualPrice: actual_price,
+      actualDate: actual_date,
+    });
+
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    // Service throws statusCode-tagged errors (404/403/409/422)
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
+    next(error);
+  }
+};
+
+/**
+ * Cancel PENDING BUY order.
+ * DELETE /api/portfolios/:portfolioId/orders/:orderId
+ *
+ * D-05 (MAP-01): PENDING → CANCELLED, CapitalService.releaseBuyLock (giảm pending_buy_lock).
+ * available_cash KHÔNG đổi (chưa trừ vì PENDING chưa fill).
+ */
+export const cancelOrder = async (req, res, next) => {
+  try {
+    const portfolio = await ensurePortfolioOwnership(req, res);
+    if (!portfolio) return;
+
+    const { orderId } = req.params;
+
+    const result = await RealOrderService.cancelBuyOrder(portfolio.id, orderId);
+
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
     next(error);
   }
 };

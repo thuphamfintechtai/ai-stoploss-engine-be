@@ -27,6 +27,15 @@ router.post('/:portfolioId/real-orders',
 router.get('/:portfolioId/real-orders',
   realOrderController.getTransactionHistory);
 
+// ─── PENDING Order Lifecycle (MAP-01, D-05) ──────────────────────────────────
+// Confirm fill cho PENDING order: chuyen lock → spent + tao Position OPEN
+router.post('/:portfolioId/orders/:orderId/confirm-fill',
+  validate(realOrderController.confirmFillSchema),
+  realOrderController.confirmOrderFill);
+// Cancel PENDING order: release lock, available_cash khong doi
+router.delete('/:portfolioId/orders/:orderId',
+  realOrderController.cancelOrder);
+
 // ─── Real Positions ───────────────────────────────────────────────────────────
 // Xem và đóng vị thế thật
 router.get('/:portfolioId/real-positions',
