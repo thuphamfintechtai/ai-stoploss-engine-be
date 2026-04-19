@@ -27,7 +27,7 @@ class Position {
     signalSourceId = null,
     notes = null,
     // Context separation fields (migration 007)
-    context = 'PAPER',
+    context = 'REAL',
     // Fee tracking fields (migration 006)
     buyFeeVnd = 0,
   }) {
