@@ -36,6 +36,8 @@ export function broadcastPortfolioUpdate(portfolioId, data) {
 
 /**
  * Broadcast cập nhật giá cổ phiếu.
+ * SECURITY (Phase 5 MDI-07): public room — payload MUST NOT contain user_id
+ * hoặc portfolio_id. Caller có trách nhiệm scrub trước khi gọi.
  * @param {string} symbol
  * @param {object} priceData
  */
@@ -56,7 +58,10 @@ export function broadcastTradeAlert(userId, alert) {
 
 /**
  * Gắn Socket.IO vào HTTP server để FE kết nối realtime.
- * Chấp nhận token từ handshake.auth.token; không từ chối kết nối nếu thiếu/sai token.
+ *
+ * Phase 5 MDI-02: JWT bắt buộc ở handshake. Connection thiếu/sai token sẽ bị reject
+ * qua `next(new Error('UNAUTHENTICATED' | 'INVALID_TOKEN'))` → socket.io tự emit
+ * `connect_error` cho client và disconnect.
  */
 export function initializeWebSocket(httpServer) {
   const io = new Server(httpServer, {
@@ -67,27 +72,27 @@ export function initializeWebSocket(httpServer) {
   io.use((socket, next) => {
     const token = socket.handshake.auth?.token;
     if (!token) {
-      socket.userId = null;
-      return next();
+      // MDI-02: reject anonymous connections — next(new Error) triggers disconnect(true) internally.
+      return next(new Error('UNAUTHENTICATED'));
     }
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       socket.userId = decoded.userId;
+      socket.userEmail = decoded.email;
     } catch {
-      socket.userId = null;
+      return next(new Error('INVALID_TOKEN'));
     }
     next();
   });
 
   io.on('connection', (socket) => {
+    // Middleware siết MDI-02 → tới đây socket.userId luôn có giá trị.
     if (process.env.LOG_LEVEL === 'debug') {
-      console.log('[WS] Client connected:', socket.id, socket.userId ? 'authenticated' : 'anonymous');
+      console.log('[WS] Client connected:', socket.id, 'user:', socket.userId);
     }
 
-    // Tự động join user room nếu đã xác thực
-    if (socket.userId) {
-      socket.join(`user:${socket.userId}`);
-    }
+    // Auto join user room (private room cho notification/trade_alert).
+    socket.join(`user:${socket.userId}`);
 
     socket.on('subscribe_portfolio', async (portfolioId) => {
       if (!portfolioId || !socket.userId) {
