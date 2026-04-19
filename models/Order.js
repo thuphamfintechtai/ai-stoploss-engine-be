@@ -8,8 +8,8 @@ import { query, transaction } from '../config/database.js';
 class Order {
   /**
    * Tạo lệnh mới.
-   * - Paper trading: status = 'PENDING' (default)
-   * - Real order: status = 'RECORDED', context = 'REAL', manualEntry = true
+   * - Real orders: status = 'PENDING' (default), context = 'REAL'
+   * - Manual recorded real order: status = 'RECORDED', manualEntry = true
    */
   static async create({
     portfolioId,
@@ -28,7 +28,7 @@ class Order {
     expiredAt = null,
     notes = null,
     // Context separation fields (migration 007)
-    context = 'PAPER',
+    context = 'REAL',
     status = 'PENDING',
     manualEntry = false,
     actualFilledAt = null,
