@@ -164,8 +164,9 @@ describe('snapAndClampReview — array over review items', () => {
         position_id: 'pos-B',
         symbol: 'HPG',
         action: 'HOLD',
-        new_stop_loss: 18_000,
-        new_take_profit: 22_000,
+        // entry 20_000 HOSE → band [18_600, 21_400]; chọn giá in-band để test no-clamp path
+        new_stop_loss: 19_000,
+        new_take_profit: 21_000,
       },
     ];
     const pricesByPosition = {
@@ -182,8 +183,8 @@ describe('snapAndClampReview — array over review items', () => {
     expect(a._original.new_stop_loss).toBe(10);
 
     const b = out.find(x => x.position_id === 'pos-B');
-    expect(b.new_stop_loss).toBe(18_000);
-    expect(b.new_take_profit).toBe(22_000);
+    expect(b.new_stop_loss).toBe(19_000);
+    expect(b.new_take_profit).toBe(21_000);
     expect(b._clamped.new_stop_loss).toBeFalsy();
     expect(b._clamped.new_take_profit).toBeFalsy();
   });
