@@ -7,6 +7,7 @@ import { validateAiResponse } from './ai/aiResponseSchemas.js';
 import { snapAndClampPrices, snapAndClampReview } from './ai/aiPostProcess.js';
 import { generateFallbackSignal, generateFallbackSLTP } from './ai/fallbackSuggestor.js';
 import { logAiCall } from './ai/auditLogger.js';
+import { enrichSymbolContext } from './ai/promptContextEnricher.js';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
@@ -368,7 +369,10 @@ export async function suggestStopLossTakeProfit({
   const inferenceStart = Date.now();
   let inferenceStatus  = 'SUCCESS';
 
+  // AIT-06: prompt context enrichment (VN-Index + sector + cafef news; graceful degrade inside)
+  const ctx = await enrichSymbolContext(symbol, exchange).catch(() => ({ header: '' }));
   const prompt =
+    (ctx.header ? ctx.header + '\n' : '') +
     `Bạn là chuyên gia phân tích kỹ thuật chứng khoán Việt Nam. ` +
     `Viết 2-3 câu mô tả NGẮN GỌN bối cảnh kỹ thuật ngắn hạn của ${symbol} (${exchange}) ` +
     `dựa trên dữ liệu sau:\n` +
@@ -481,7 +485,9 @@ export async function analyzeTrend({ symbol, exchange, ohlcvData = [], indicator
     ? ((recent5[recent5.length - 1].close - recent5[0].open) / recent5[0].open) * 100
     : 0;
 
-  const prompt = `Bạn là chuyên gia phân tích kỹ thuật chứng khoán Việt Nam (HOSE, HNX, UPCOM).
+  // AIT-06: prompt context enrichment (VN-Index + sector + cafef news; graceful degrade inside)
+  const ctx = await enrichSymbolContext(symbol, exchange).catch(() => ({ header: '' }));
+  const prompt = (ctx.header ? ctx.header + '\n' : '') + `Bạn là chuyên gia phân tích kỹ thuật chứng khoán Việt Nam (HOSE, HNX, UPCOM).
 Hãy phân tích xu hướng cho mã ${symbol} (${exchange}).
 
 Dữ liệu thống kê:
@@ -748,7 +754,9 @@ export async function generateSignal({ symbol, exchange = 'HOSE', currentPrice, 
   const avgVolume = volumes.length > 0 ? volumes.slice(-10).reduce((a, b) => a + b, 0) / 10 : null;
   const lastVolume = volumes[volumes.length - 1];
 
-  const prompt = `Bạn là AI trading chuyên phân tích chứng khoán Việt Nam. Hãy tạo tín hiệu giao dịch cho mã ${symbol}.
+  // AIT-06: prompt context enrichment (VN-Index + sector + cafef news; graceful degrade inside)
+  const ctx = await enrichSymbolContext(symbol, exchange).catch(() => ({ header: '' }));
+  const prompt = (ctx.header ? ctx.header + '\n' : '') + `Bạn là AI trading chuyên phân tích chứng khoán Việt Nam. Hãy tạo tín hiệu giao dịch cho mã ${symbol}.
 
 Thông tin thị trường:
 - Mã: ${symbol} (${exchange})
@@ -931,7 +939,18 @@ export async function reviewOpenPositions({ positions, currentPrices, userId = n
 
   if (positionDetails.length === 0) return [];
 
-  const prompt = `Bạn là chuyên gia quản lý rủi ro và giao dịch chứng khoán Việt Nam với 20 năm kinh nghiệm. Review các vị thế đang mở và đưa ra khuyến nghị hành động cụ thể.
+  // AIT-06: enrich tối đa 3 symbol unique — avoid token budget blow up cho nhiều positions
+  const uniqueSymbols = [...new Set(positionDetails.map(p => p.symbol))].slice(0, 3);
+  const ctxResults = await Promise.all(
+    uniqueSymbols.map(s => {
+      const p = positionDetails.find(d => d.symbol === s);
+      return enrichSymbolContext(s, p?.exchange || 'HOSE').catch(() => ({ header: '' }));
+    })
+  );
+  const combinedHeader = ctxResults.map(c => c.header).filter(Boolean).join('\n---\n');
+  const contextBlock = combinedHeader ? combinedHeader + '\n\n' : '';
+
+  const prompt = contextBlock + `Bạn là chuyên gia quản lý rủi ro và giao dịch chứng khoán Việt Nam với 20 năm kinh nghiệm. Review các vị thế đang mở và đưa ra khuyến nghị hành động cụ thể.
 
 Danh sách vị thế cần review:
 ${JSON.stringify(positionDetails, null, 2)}
