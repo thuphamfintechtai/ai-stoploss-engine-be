@@ -17,7 +17,10 @@ class RealPositionService {
    * 1. Tìm và verify position (context='REAL', status='OPEN')
    * 2. Tạo sell order record (context='REAL', side='SELL', status='RECORDED')
    * 3. Tính P&L với fees
-   * 4. Update position: status='CLOSED_MANUAL', exit_price, closed_at, pnl
+   * 4. Update position: status='CLOSED_MANUAL', closed_price, closed_at, pnl
+   *
+   * MAP-03: SQL dùng `closed_price` (khớp schema financial.positions có CHECK constraint).
+   * MAP-05 D-06 LOCKED: integer VND math (Math.round(Number(x))) — no parseFloat drift.
    *
    * @param {string} positionId
    * @param {object} params
@@ -59,13 +62,11 @@ class RealPositionService {
         sell_tax_percent: position.sell_tax_percent,
       };
 
-      // 2. Tính fees và P&L
-      const pnl = calculateFees(
-        Number(position.entry_price),
-        Number(sellPrice),
-        Number(position.quantity),
-        portfolio
-      );
+      // 2. Tính fees và P&L — ép integer VND đầu vào (MAP-05 D-06)
+      const entryVndInt = Math.round(Number(position.entry_price));
+      const sellVndInt = Math.round(Number(sellPrice));
+      const qtyInt = Math.round(Number(position.quantity));
+      const pnl = calculateFees(entryVndInt, sellVndInt, qtyInt, portfolio);
 
       // 3. Tạo sell order record
       const sellOrderRes = await client.query(
@@ -88,11 +89,12 @@ class RealPositionService {
       );
       const sellOrder = sellOrderRes.rows[0];
 
-      // 4. Update position: CLOSED_MANUAL + P&L data
+      // 4. Update position: CLOSED_MANUAL + P&L data.
+      // MAP-03: dùng `closed_price` (schema canonical, có CHECK constraint), KHÔNG dùng exit_price.
       const updatedPosRes = await client.query(
         `UPDATE financial.positions
          SET status = 'CLOSED_MANUAL',
-             exit_price = $2,
+             closed_price = $2,
              closed_at = $3,
              sell_fee_vnd = $4,
              sell_tax_vnd = $5,
@@ -103,7 +105,7 @@ class RealPositionService {
          RETURNING *`,
         [
           positionId,
-          sellPrice,
+          sellVndInt,
           sellDate,
           pnl.sell_fee_vnd,
           pnl.sell_tax_vnd,
@@ -112,8 +114,11 @@ class RealPositionService {
         ]
       );
 
-      // Tính tiền thuần nhận được sau khi bán (sau phí + thuế) -> thêm vào pending settlement T+2
-      const netSellProceeds = (Number(sellPrice) * Number(position.quantity)) - pnl.sell_fee_vnd - pnl.sell_tax_vnd;
+      // Tính tiền thuần nhận được sau khi bán (sau phí + thuế) -> thêm vào pending settlement T+2.
+      // MAP-05 D-06: integer VND defense-in-depth, outer Math.round dù fee đã integer.
+      const netSellProceeds = Math.round(
+        sellVndInt * qtyInt - pnl.sell_fee_vnd - pnl.sell_tax_vnd
+      );
       const settlementDate = addBusinessDays(new Date(sellDate), 2);
       await CapitalService.addPendingSettlement(portfolioId, netSellProceeds, settlementDate);
 

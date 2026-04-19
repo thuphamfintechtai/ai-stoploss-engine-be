@@ -29,9 +29,22 @@ vi.mock('../../services/shared/feeEngine.js', () => ({
   }),
 }));
 
+// Mock CapitalService (closePosition calls addPendingSettlement → DB side effect unwanted in unit test)
+vi.mock('../../services/portfolio/capitalService.js', () => ({
+  default: {
+    addPendingSettlement: vi.fn().mockResolvedValue(undefined),
+  },
+  addBusinessDays: vi.fn((date, days) => {
+    const d = new Date(date);
+    d.setDate(d.getDate() + days);
+    return d;
+  }),
+}));
+
 import { query, transaction } from '../../config/database.js';
 import Order from '../../models/Order.js';
 import { calculateFees } from '../../services/shared/feeEngine.js';
+import CapitalService from '../../services/portfolio/capitalService.js';
 import RealPositionService from '../../services/portfolio/realPositionService.js';
 
 describe('RealPositionService', () => {
@@ -194,6 +207,112 @@ describe('RealPositionService', () => {
         call[0] && call[0].includes('REAL') && call[0].includes('OPEN')
       );
       expect(hasCorrectFilter).toBe(true);
+    });
+  });
+
+  describe('closePosition SQL column fix (MAP-03) — closed_price align schema', () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it('UPDATE financial.positions query dung closed_price, KHONG dung exit_price', async () => {
+      const capturedQueries = [];
+      const mockPosition = {
+        id: 'pos-1',
+        portfolio_id: 'port-1',
+        status: 'OPEN',
+        entry_price: '80000',
+        quantity: '100',
+        symbol: 'VNM',
+        exchange: 'HOSE',
+        buy_fee_percent: '0.0015',
+        sell_fee_percent: '0.0015',
+        sell_tax_percent: '0.001',
+      };
+
+      transaction.mockImplementationOnce(async (callback) => {
+        const mockClient = {
+          query: vi.fn().mockImplementation((sql) => {
+            capturedQueries.push(sql);
+            if (sql.startsWith('SELECT')) {
+              return Promise.resolve({ rows: [mockPosition], rowCount: 1 });
+            }
+            if (sql.includes('INSERT INTO financial.orders')) {
+              return Promise.resolve({ rows: [{ id: 'order-1' }], rowCount: 1 });
+            }
+            // UPDATE financial.positions
+            return Promise.resolve({ rows: [{ id: 'pos-1', status: 'CLOSED_MANUAL' }], rowCount: 1 });
+          }),
+        };
+        return callback(mockClient);
+      });
+
+      await RealPositionService.closePosition('pos-1', {
+        sellPrice: 85000,
+        sellDate: '2026-04-19',
+        portfolioId: 'port-1',
+      });
+
+      const updateSql = capturedQueries.find(
+        (q) => q.includes('UPDATE financial.positions')
+      );
+      expect(updateSql).toBeDefined();
+      // Phai dung closed_price, KHONG duoc con exit_price
+      expect(updateSql).toMatch(/closed_price\s*=\s*\$\d/);
+      expect(updateSql).not.toMatch(/exit_price\s*=/);
+    });
+
+    it('addPendingSettlement nhan netSellProceeds la integer VND (MAP-05 D-06)', async () => {
+      const mockPosition = {
+        id: 'pos-1',
+        portfolio_id: 'port-1',
+        status: 'OPEN',
+        entry_price: '80000',
+        quantity: '100',
+        symbol: 'VNM',
+        exchange: 'HOSE',
+        buy_fee_percent: '0.0015',
+        sell_fee_percent: '0.0015',
+        sell_tax_percent: '0.001',
+      };
+
+      transaction.mockImplementationOnce(async (callback) => {
+        const mockClient = {
+          query: vi
+            .fn()
+            .mockResolvedValueOnce({ rows: [mockPosition], rowCount: 1 }) // SELECT
+            .mockResolvedValueOnce({ rows: [{ id: 'order-1' }], rowCount: 1 }) // INSERT
+            .mockResolvedValueOnce({ rows: [{ id: 'pos-1', status: 'CLOSED_MANUAL' }], rowCount: 1 }), // UPDATE
+        };
+        return callback(mockClient);
+      });
+
+      await RealPositionService.closePosition('pos-1', {
+        sellPrice: 85000,
+        sellDate: '2026-04-19',
+        portfolioId: 'port-1',
+      });
+
+      expect(CapitalService.addPendingSettlement).toHaveBeenCalled();
+      const callArgs = CapitalService.addPendingSettlement.mock.calls[0];
+      const netAmount = callArgs[1]; // (portfolioId, netAmount, settlementDate)
+      expect(typeof netAmount).toBe('number');
+      expect(Number.isInteger(netAmount)).toBe(true);
+      expect(Number.isFinite(netAmount)).toBe(true);
+    });
+
+    it('closePosition source code KHONG con reference toi exit_price', async () => {
+      // Smoke assertion: doc source file verify column naming da align
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      const url = await import('node:url');
+      const here = path.dirname(url.fileURLToPath(import.meta.url));
+      const srcPath = path.resolve(here, '../../services/portfolio/realPositionService.js');
+      const source = fs.readFileSync(srcPath, 'utf8');
+      // Allow exit_price trong comment historical, nhung KHONG duoc xuat hien trong SQL string
+      // Simplest: verify no `exit_price = $N` pattern
+      expect(source).not.toMatch(/exit_price\s*=\s*\$\d/);
+      expect(source).toMatch(/closed_price\s*=\s*\$\d/);
     });
   });
 });
