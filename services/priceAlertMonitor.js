@@ -13,6 +13,7 @@ import cron from 'node-cron';
 import { query } from '../config/database.js';
 import { createNotification } from './notificationService.js';
 import { broadcastPriceUpdate } from './websocket.js';
+import { isMarketOpen, getMarketSession } from './shared/vnMarketRules.js';
 
 const DB = process.env.DB_SCHEMA || 'financial';
 const API_BASE = process.env.API_BASE_URL || 'http://localhost:3000';
@@ -54,10 +55,30 @@ async function checkPriceAlerts() {
        JOIN ${DB}.users u ON pa.user_id = u.id
        WHERE pa.is_active = TRUE AND pa.is_triggered = FALSE`
     );
-    const alerts = result.rows;
+    const allAlerts = result.rows;
+    if (allAlerts.length === 0) return;
+
+    // Phase 5 MDI-01 / D-01: gate per-exchange theo isMarketOpen.
+    // Exchange CLOSED (weekend, sau 15:00, trước 9:00, lunch...) → skip alert group,
+    // log format chuẩn D-01: `[alert] evaluateAlerts skipped — exchange=X session=Y ts=...`.
+    const now = new Date();
+    const exchanges = [...new Set(allAlerts.map(a => (a.exchange || 'HOSE').toUpperCase()))];
+    const openExchanges = new Set();
+    for (const ex of exchanges) {
+      if (isMarketOpen(ex, now)) {
+        openExchanges.add(ex);
+      } else {
+        const session = getMarketSession(ex, now);
+        console.log(
+          `[alert] evaluateAlerts skipped — exchange=${ex} session=${session} ts=${now.toISOString()} market_closed`
+        );
+      }
+    }
+
+    const alerts = allAlerts.filter(a => openExchanges.has((a.exchange || 'HOSE').toUpperCase()));
     if (alerts.length === 0) return;
 
-    // Lấy giá cho tất cả symbols unique
+    // Lấy giá cho tất cả symbols unique (chỉ các exchange đang mở)
     const symbols = [...new Set(alerts.map(a => a.symbol))];
     await Promise.all(symbols.map(sym => {
       const alert = alerts.find(a => a.symbol === sym);
@@ -213,3 +234,12 @@ export function startPriceAlertMonitor() {
 
   console.log('📡 Price Alert Monitor started (alerts:', alertCron, '/ broadcast:', broadcastCron + ')');
 }
+
+// Test-only exports — truy cập nội bộ cho unit test (MDI-01).
+// KHÔNG dùng ở runtime (Phase 5).
+export const __test__ = {
+  checkPriceAlerts,
+  broadcastWatchlistPrices,
+  priceCache,
+};
+
