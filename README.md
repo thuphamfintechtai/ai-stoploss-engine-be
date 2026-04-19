@@ -2,7 +2,7 @@
 
 Backend API server cho hệ thống hỗ trợ dừng lỗ và chốt lợi nhuận tăng cường AI, phục vụ nhà đầu tư chứng khoán Việt Nam.
 
-Hệ thống gồm 2 module chính: Portfolio Management (quản lý danh mục thật) và Paper Trading (mô phỏng giao dịch). Tích hợp Google Gemini AI để tư vấn stop loss, take profit, cảnh báo rủi ro và hỗ trợ ra quyết định.
+Hệ thống tập trung vào Portfolio Management (quản lý danh mục thật). Tích hợp Google Gemini AI để tư vấn stop loss, take profit, cảnh báo rủi ro và hỗ trợ ra quyết định.
 
 
 ## Công nghệ
@@ -55,17 +55,12 @@ ai-stoploss-engine-be/
 │   ├── portfolio.controller.js # Xử lý danh mục
 │   ├── market.controller.js    # Xử lý dữ liệu thị trường
 │   ├── ai.controller.js        # Xử lý phân tích AI
-│   ├── paper/                  # Paper trading controllers
-│   │   ├── paperPosition.controller.js
-│   │   ├── paperOrder.controller.js
-│   │   └── paperPerformance.controller.js
 │   └── portfolio/              # Portfolio management controllers
 │       ├── realOrder.controller.js
 │       ├── realPosition.controller.js
 │       └── portfolioSummary.controller.js
 ├── services/
 │   ├── aiService.js            # Tích hợp Google Gemini
-│   ├── stopLossResolver.js     # Quyết định đóng vị thế (SL/TP)
 │   ├── priceAlertMonitor.js    # Giám sát cảnh báo giá
 │   ├── cafefNewsService.js     # Tin tức từ CafeF
 │   ├── marketNewsService.js    # Tin tức thị trường
@@ -81,11 +76,6 @@ ai-stoploss-engine-be/
 │   │   ├── sectorConcentration.js   # Tập trung ngành
 │   │   ├── regimeDetector.js        # Nhận diện xu hướng thị trường
 │   │   └── indicatorCache.js        # Cache chỉ báo kỹ thuật
-│   ├── paper/                  # Paper trading services
-│   │   ├── fillEngine.js           # Khớp lệnh paper
-│   │   ├── paperMatchingEngine.js   # So khớp giá
-│   │   ├── paperCapitalService.js   # Quản lý vốn paper
-│   │   └── paperPerformanceService.js # Báo cáo hiệu suất
 │   ├── portfolio/              # Portfolio services
 │   │   ├── capitalService.js       # Quản lý vốn thật
 │   │   ├── realOrderService.js     # Xử lý lệnh thật
@@ -101,7 +91,6 @@ ai-stoploss-engine-be/
 │       └── priceBandValidator.js   # Kiểm tra biên độ giá
 ├── workers/
 │   ├── stopLossMonitor.js      # Giám sát SL/TP (chạy mỗi 2 phút)
-│   ├── paperFillWorker.js      # Kiểm tra khớp lệnh paper
 │   └── settlementWorker.js     # Xử lý thanh toán T+2
 ├── scripts/
 │   ├── migrate.js              # Chạy migration
@@ -255,10 +244,9 @@ Server chạy tại `http://localhost:3000`.
 
 ## Background Workers
 
-Hệ thống có 3 worker chạy nền:
+Hệ thống có 2 worker chạy nền:
 
 - **Stop Loss Monitor** - Kiểm tra các vị thế mỗi 2 phút, tự động đóng khi chạm ngưỡng SL/TP. Xử lý xung đột giữa SL và TP, tính trượt giá.
-- **Paper Fill Worker** - Kiểm tra lệnh paper trading có khớp với giá thị trường không, tự động fill khi đủ điều kiện.
 - **Settlement Worker** - Xử lý thanh toán T+2 theo quy định sàn chứng khoán Việt Nam.
 
 
@@ -286,7 +274,6 @@ npm run test:watch
 ```
 
 Tests sử dụng Vitest, bao gồm:
-- Paper trading engine (order, fill, matching, capital, performance)
 - AI services (stop loss động, phân bổ vốn, VaR, Monte Carlo, stress test)
 - Portfolio services (order, position, settlement, summary)
 
