@@ -6,6 +6,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { validateAiResponse } from './ai/aiResponseSchemas.js';
 import { snapAndClampPrices, snapAndClampReview } from './ai/aiPostProcess.js';
 import { generateFallbackSignal, generateFallbackSLTP } from './ai/fallbackSuggestor.js';
+import { logAiCall } from './ai/auditLogger.js';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
@@ -33,34 +34,76 @@ function getModel() {
  * Gọi Gemini và trả về JSON đã parse.
  * Prompt phải yêu cầu AI trả JSON thuần (không có markdown fence).
  * Có timeout 5 giây — throw Error('Gemini timeout after 5s') để callers có thể catch và fallback.
+ *
+ * AIT-09 (D-09): Neu auditContext = { userId, endpoint } duoc truyen →
+ * fire-and-forget insert ai_audit_log cho ca success + error path.
+ *
+ * @param {string} prompt
+ * @param {{userId?: string, endpoint?: string} | null} [auditContext=null]
+ * @returns {Promise<any>} Parsed JSON
  */
-export async function callGeminiJSON(prompt) {
+export async function callGeminiJSON(prompt, auditContext = null) {
   const model = getModel();
+  const started = Date.now();
 
   const timeoutPromise = new Promise((_, reject) =>
     setTimeout(() => reject(new Error('Gemini timeout after 5s')), GEMINI_TIMEOUT_MS)
   );
 
-  const result = await Promise.race([model.generateContent(prompt), timeoutPromise]);
-  const text = result.response.text().trim();
-
-  // Strip markdown code fences nếu có
-  let clean = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-
-  // Strip control characters (tab, vertical tab, form feed, etc.) mà JSON.parse không chấp nhận
-  clean = clean.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
-
-  // Tìm phần JSON trong response (từ { hoặc [ đến } hoặc ])
-  const jsonMatch = clean.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
-  if (jsonMatch) clean = jsonMatch[1];
-
+  let rawText = '';
   try {
-    return JSON.parse(clean);
-  } catch (parseErr) {
-    console.error('[AI] JSON parse failed. Raw text (first 500 chars):', text.slice(0, 500));
-    console.error('[AI] Clean text (first 500 chars):', clean.slice(0, 500));
-    const err = new Error('AI trả về response không phải JSON hợp lệ');
-    err.rawText = text;
+    const result = await Promise.race([model.generateContent(prompt), timeoutPromise]);
+    const text = result.response.text().trim();
+    rawText = text;
+
+    // Strip markdown code fences nếu có
+    let clean = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+    // Strip control characters (tab, vertical tab, form feed, etc.) mà JSON.parse không chấp nhận
+    clean = clean.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+
+    // Tìm phần JSON trong response (từ { hoặc [ đến } hoặc ])
+    const jsonMatch = clean.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+    if (jsonMatch) clean = jsonMatch[1];
+
+    let parsed;
+    try {
+      parsed = JSON.parse(clean);
+    } catch (parseErr) {
+      console.error('[AI] JSON parse failed. Raw text (first 500 chars):', text.slice(0, 500));
+      console.error('[AI] Clean text (first 500 chars):', clean.slice(0, 500));
+      const err = new Error('AI trả về response không phải JSON hợp lệ');
+      err.rawText = text;
+      throw err;
+    }
+
+    // AIT-09: audit success (fire-and-forget)
+    if (auditContext && auditContext.userId) {
+      logAiCall({
+        userId: auditContext.userId,
+        endpoint: auditContext.endpoint || 'callGeminiJSON',
+        modelVersion: MODEL_NAME,
+        prompt,
+        response: rawText,
+        latencyMs: Date.now() - started,
+        status: 'success',
+      }).catch(() => {});
+    }
+
+    return parsed;
+  } catch (err) {
+    // AIT-09: audit error / timeout / schema-related throws (fire-and-forget)
+    if (auditContext && auditContext.userId) {
+      logAiCall({
+        userId: auditContext.userId,
+        endpoint: auditContext.endpoint || 'callGeminiJSON',
+        modelVersion: MODEL_NAME,
+        prompt,
+        response: rawText || err.message,
+        latencyMs: Date.now() - started,
+        status: 'error',
+      }).catch(() => {});
+    }
     throw err;
   }
 }
@@ -100,9 +143,14 @@ function _pickFields(obj, fields) {
  * @returns {Promise<object>} Parsed + validated + adjusted payload
  */
 export async function callGeminiJSONValidated(prompt, schemaKey, options = {}) {
-  const { exchange = 'HOSE', referencePrice = null, priceFields = [] } = options;
+  const {
+    exchange = 'HOSE',
+    referencePrice = null,
+    priceFields = [],
+    auditContext = null, // AIT-09: { userId, endpoint } — truyen xuong callGeminiJSON
+  } = options;
 
-  const raw = await callGeminiJSON(prompt);
+  const raw = await callGeminiJSON(prompt, auditContext);
   const { ok, value, errors } = validateAiResponse(schemaKey, raw);
   if (!ok) {
     const firstMsg = errors && errors[0] ? errors[0].message : 'unknown';
@@ -251,6 +299,7 @@ function fallbackAnalysisText(symbol, atr14, supports) {
 export async function suggestStopLossTakeProfit({
   symbol, exchange, currentPrice, ohlcvData = [],
   rrRatio = 2, side = 'LONG',
+  userId = null, // AIT-09: audit context
 }) {
   // ── Data quality gate ──────────────────────────────────────────────────────
   if (ohlcvData.length < MIN_CANDLES_FOR_AI) {
@@ -319,27 +368,53 @@ export async function suggestStopLossTakeProfit({
   const inferenceStart = Date.now();
   let inferenceStatus  = 'SUCCESS';
 
-  try {
-    const prompt =
-      `Bạn là chuyên gia phân tích kỹ thuật chứng khoán Việt Nam. ` +
-      `Viết 2-3 câu mô tả NGẮN GỌN bối cảnh kỹ thuật ngắn hạn của ${symbol} (${exchange}) ` +
-      `dựa trên dữ liệu sau:\n` +
-      `- Giá hiện tại: ${currentPrice.toLocaleString('vi-VN')}đ\n` +
-      `- ATR 14 phiên: ${Math.round(atr14).toLocaleString('vi-VN')}đ\n` +
-      `- Vùng hỗ trợ gần: ${supports.slice(0,2).map(v => v.toLocaleString('vi-VN')).join(', ') || 'N/A'}đ\n` +
-      `- Vùng kháng cự gần: ${resistances.slice(0,2).map(v => v.toLocaleString('vi-VN')).join(', ') || 'N/A'}đ\n` +
-      `KHÔNG đề xuất giá mua/bán cụ thể. KHÔNG dự báo xu hướng chắc chắn. Chỉ mô tả bối cảnh.`;
+  const prompt =
+    `Bạn là chuyên gia phân tích kỹ thuật chứng khoán Việt Nam. ` +
+    `Viết 2-3 câu mô tả NGẮN GỌN bối cảnh kỹ thuật ngắn hạn của ${symbol} (${exchange}) ` +
+    `dựa trên dữ liệu sau:\n` +
+    `- Giá hiện tại: ${currentPrice.toLocaleString('vi-VN')}đ\n` +
+    `- ATR 14 phiên: ${Math.round(atr14).toLocaleString('vi-VN')}đ\n` +
+    `- Vùng hỗ trợ gần: ${supports.slice(0,2).map(v => v.toLocaleString('vi-VN')).join(', ') || 'N/A'}đ\n` +
+    `- Vùng kháng cự gần: ${resistances.slice(0,2).map(v => v.toLocaleString('vi-VN')).join(', ') || 'N/A'}đ\n` +
+    `KHÔNG đề xuất giá mua/bán cụ thể. KHÔNG dự báo xu hướng chắc chắn. Chỉ mô tả bối cảnh.`;
 
+  try {
     const model  = getModel();
     const result = await Promise.race([
       model.generateContent(prompt),
       new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10_000)),
     ]);
     analysisText = result.response.text().trim().replace(/[*#_`]/g, ''); // strip markdown
+
+    // AIT-09: audit success (fire-and-forget)
+    if (userId) {
+      logAiCall({
+        userId,
+        endpoint: 'suggestStopLossTakeProfit',
+        modelVersion: MODEL_NAME,
+        prompt,
+        response: analysisText,
+        latencyMs: Date.now() - inferenceStart,
+        status: 'success',
+      }).catch(() => {});
+    }
   } catch (err) {
     inferenceStatus = err.message === 'timeout' ? 'TIMEOUT' : 'ERROR';
     analysisText    = fallbackAnalysisText(symbol, atr14, supports);
     console.warn(`[AI] Gemini text generation failed (${inferenceStatus}): ${err.message}`);
+
+    // AIT-09: audit error (fallback path)
+    if (userId) {
+      logAiCall({
+        userId,
+        endpoint: 'suggestStopLossTakeProfit',
+        modelVersion: MODEL_NAME,
+        prompt,
+        response: err.message,
+        latencyMs: Date.now() - inferenceStart,
+        status: inferenceStatus === 'TIMEOUT' ? 'fallback' : 'error',
+      }).catch(() => {});
+    }
   }
 
   return {
@@ -374,7 +449,7 @@ export async function suggestStopLossTakeProfit({
  * @param {object} [params.indicators] - Các chỉ báo kỹ thuật (nếu có)
  * @returns {Promise<object>} Phân tích xu hướng
  */
-export async function analyzeTrend({ symbol, exchange, ohlcvData = [], indicators = {} }) {
+export async function analyzeTrend({ symbol, exchange, ohlcvData = [], indicators = {}, userId = null }) {
   if (ohlcvData.length < 5) {
     return {
       trend: 'UNKNOWN',
@@ -446,7 +521,10 @@ Hãy phân tích và trả về JSON (không có markdown fence):
 
   try {
     // analyzeTrend: validate schema only — support/resistance arrays không clamp (informational).
-    const result = await callGeminiJSONValidated(prompt, 'trend', { exchange });
+    const result = await callGeminiJSONValidated(prompt, 'trend', {
+      exchange,
+      auditContext: userId ? { userId, endpoint: 'analyzeTrend' } : null,
+    });
     return { ...result, ai_source: 'gemini' };
   } catch (_err) {
     console.warn('[AI] analyzeTrend Gemini fallback:', _err.message);
@@ -479,7 +557,7 @@ Hãy phân tích và trả về JSON (không có markdown fence):
  * @param {Array}  [params.ohlcvData] - Dữ liệu giá lịch sử
  * @returns {Promise<object>} Đánh giá rủi ro
  */
-export async function evaluateTradeRisk({ symbol, exchange, entryPrice, stopLoss, takeProfit, quantity, portfolioData = {}, ohlcvData = [] }) {
+export async function evaluateTradeRisk({ symbol, exchange, entryPrice, stopLoss, takeProfit, quantity, portfolioData = {}, ohlcvData = [], userId = null }) {
   const riskPerShare = Math.abs(entryPrice - stopLoss);
   const riskVND = riskPerShare * quantity;
   const totalValue = entryPrice * quantity;
@@ -545,7 +623,9 @@ Hãy đánh giá rủi ro toàn diện và trả về JSON (không có markdown 
 
   try {
     // evaluateTradeRisk: validate schema, không suggest giá mới → không cần snap/clamp.
-    const result = await callGeminiJSONValidated(prompt, 'evaluateRisk');
+    const result = await callGeminiJSONValidated(prompt, 'evaluateRisk', {
+      auditContext: userId ? { userId, endpoint: 'evaluateTradeRisk' } : null,
+    });
     return { ...result, ai_source: 'gemini' };
   } catch (_err) {
     console.warn('[AI] evaluateTradeRisk Gemini fallback:', _err.message);
@@ -654,7 +734,7 @@ export async function generateSmartAlerts(positions, currentPrices = {}) {
  * @param {object} [params.companyInfo] - Thông tin công ty (tùy chọn)
  * @returns {Promise<object>} Tín hiệu giao dịch
  */
-export async function generateSignal({ symbol, exchange = 'HOSE', currentPrice, ohlcvData = [], companyInfo = null }) {
+export async function generateSignal({ symbol, exchange = 'HOSE', currentPrice, ohlcvData = [], companyInfo = null, userId = null }) {
   const recentCandles = ohlcvData.slice(-30);
   const closes = recentCandles.map(c => c.close);
   const highs = recentCandles.map(c => c.high);
@@ -709,6 +789,7 @@ Trả về JSON tín hiệu giao dịch (không có markdown fence):
       exchange,
       referencePrice: currentPrice,
       priceFields: ['entry_price', 'stop_loss', 'take_profit'],
+      auditContext: userId ? { userId, endpoint: 'generateSignal' } : null,
     });
     return { ...result, ai_source: 'gemini' };
   } catch (_err) {
@@ -733,7 +814,7 @@ Trả về JSON tín hiệu giao dịch (không có markdown fence):
  * @param {object} params.marketOverview - Tổng quan thị trường
  * @returns {Promise<object>} Tóm tắt thị trường
  */
-export async function generateMarketSummary({ portfolioStats, openPositions = [], marketOverview = {} }) {
+export async function generateMarketSummary({ portfolioStats, openPositions = [], marketOverview = {}, userId = null }) {
   const { vnindexChange, vn30Change, totalVolume } = marketOverview;
   const { totalBalance, currentRiskPercent, openCount, totalPnl } = portfolioStats;
 
@@ -770,7 +851,10 @@ Trả về JSON (không có markdown fence):
 }`;
 
   try {
-    const result = await callGeminiJSON(prompt);
+    const result = await callGeminiJSON(
+      prompt,
+      userId ? { userId, endpoint: 'generateMarketSummary' } : null,
+    );
     return { ...result, ai_source: 'gemini' };
   } catch (_err) {
     console.warn('[AI] generateMarketSummary Gemini fallback:', _err.message);
@@ -800,7 +884,7 @@ Trả về JSON (không có markdown fence):
  * @param {object} params.currentPrices - { symbol: priceVND }
  * @returns {Promise<Array>} Danh sách khuyến nghị
  */
-export async function reviewOpenPositions({ positions, currentPrices }) {
+export async function reviewOpenPositions({ positions, currentPrices, userId = null }) {
   if (!positions || positions.length === 0) return [];
 
   const positionDetails = positions.map(pos => {
@@ -875,7 +959,10 @@ Trả về JSON array (không markdown fence):
 
   try {
     // reviewOpenPositions: parse → validate review schema → snap/clamp từng item theo entry_price của position.
-    const rawResult = await callGeminiJSON(prompt);
+    const rawResult = await callGeminiJSON(
+      prompt,
+      userId ? { userId, endpoint: 'reviewOpenPositions' } : null,
+    );
     const rawArr = Array.isArray(rawResult) ? rawResult : (rawResult ? [rawResult] : []);
 
     const { ok, value, errors } = validateAiResponse('review', rawArr);
@@ -924,7 +1011,7 @@ Trả về JSON array (không markdown fence):
  * @param {object} params.marketBreadth - { advancing, declining, unchanged }
  * @returns {Promise<object>} Chế độ thị trường và chiến lược
  */
-export async function detectMarketRegime({ vnindexData = [], marketBreadth = {} }) {
+export async function detectMarketRegime({ vnindexData = [], marketBreadth = {}, userId = null }) {
   const closes = vnindexData.map(c => c.close ?? c.c ?? 0).filter(Boolean);
   const recent20 = vnindexData.slice(-20);
 
@@ -995,7 +1082,9 @@ Trả về JSON (không markdown fence):
 
   try {
     // detectMarketRegime: validate schema, không suggest giá stock cụ thể → không cần snap/clamp.
-    const result = await callGeminiJSONValidated(prompt, 'regime');
+    const result = await callGeminiJSONValidated(prompt, 'regime', {
+      auditContext: userId ? { userId, endpoint: 'detectMarketRegime' } : null,
+    });
     return { ...result, ai_source: 'gemini' };
   } catch (_err) {
     console.warn('[AI] detectMarketRegime Gemini fallback:', _err.message);

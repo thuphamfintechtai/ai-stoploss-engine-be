@@ -189,7 +189,8 @@ export async function suggestSLTP(req, res, next) {
 
     const result = await suggestStopLossTakeProfit({
       symbol, exchange, currentPrice, ohlcvData, rrRatio: rr_ratio, side,
-      capital, riskPercent: risk_percent, quantity
+      capital, riskPercent: risk_percent, quantity,
+      userId: req.user.userId, // AIT-09: audit context
     });
 
     // Tính position sizing dựa trên mức SL được khuyến nghị
@@ -339,7 +340,10 @@ export async function analyzeMarketTrend(req, res, next) {
       });
     }
 
-    const result = await analyzeTrend({ symbol, exchange, ohlcvData, indicators: indicators || {} });
+    const result = await analyzeTrend({
+      symbol, exchange, ohlcvData, indicators: indicators || {},
+      userId: req.user.userId, // AIT-09
+    });
 
     // Lưu kết quả vào DB (ai_evaluations) nếu có kết quả hợp lệ
     try {
@@ -415,7 +419,8 @@ export async function evaluateRisk(req, res, next) {
         currentRiskVND: riskStatus.currentRiskVND,
         maxRiskVND: riskStatus.maxRiskVND
       },
-      ohlcvData
+      ohlcvData,
+      userId: req.user.userId, // AIT-09
     });
 
     // Tính thêm các metrics cơ bản
@@ -577,7 +582,10 @@ export async function getDashboardSummary(req, res, next) {
     let aiSummary = null;
     if (process.env.GEMINI_API_KEY) {
       try {
-        aiSummary = await generateMarketSummary({ portfolioStats, openPositions, marketOverview });
+        aiSummary = await generateMarketSummary({
+          portfolioStats, openPositions, marketOverview,
+          userId: req.user.userId, // AIT-09
+        });
       } catch (aiErr) {
         console.error('[AI Dashboard] Failed to generate summary:', aiErr.message);
       }
@@ -658,7 +666,10 @@ export async function analyzeWatchlistSymbol(req, res, next) {
     }
 
     // Gọi AI phân tích xu hướng với đầy đủ dữ liệu
-    const trendResult = await analyzeTrend({ symbol: sym, exchange, ohlcvData });
+    const trendResult = await analyzeTrend({
+      symbol: sym, exchange, ohlcvData,
+      userId: req.user.userId, // AIT-09
+    });
 
     // Map đúng từ response AI (AI trả key_levels.support, key_levels.resistance)
     const keyLevels = trendResult.key_levels || {};
@@ -800,7 +811,10 @@ export async function reviewPositions(req, res, next) {
     );
 
     // Gọi AI review
-    const recommendations = await reviewOpenPositions({ positions, currentPrices: priceMap });
+    const recommendations = await reviewOpenPositions({
+      positions, currentPrices: priceMap,
+      userId: req.user.userId, // AIT-09
+    });
 
     // Tính portfolio health score (100 = tốt, giảm theo cảnh báo)
     const highUrgencyCount = recommendations.filter(r => r.urgency === 'HIGH').length;
@@ -946,7 +960,10 @@ export async function getMarketRegime(req, res, next) {
       }
     } catch { /* Bỏ qua nếu không lấy được */ }
 
-    const result = await detectMarketRegime({ vnindexData, marketBreadth });
+    const result = await detectMarketRegime({
+      vnindexData, marketBreadth,
+      userId: req.user.userId, // AIT-09
+    });
 
     const cacheData = {
       ...result,
