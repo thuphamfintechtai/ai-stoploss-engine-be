@@ -483,3 +483,25 @@ CREATE INDEX IF NOT EXISTS idx_ai_analyses_user_symbol
   ON financial.ai_analyses (user_id, symbol, created_at DESC);
 
 COMMENT ON TABLE financial.ai_analyses IS 'Lịch sử phân tích xu hướng AI cho từng mã CK theo user';
+
+-- ============================================================
+-- 15. PENDING BUY LOCK (Migration 012 — MAP-01, D-05, D-07)
+-- Reflect column + CHECK constraint cho schema canonical.
+-- ============================================================
+
+ALTER TABLE financial.portfolios
+  ADD COLUMN IF NOT EXISTS pending_buy_lock NUMERIC(20, 2) NOT NULL DEFAULT 0;
+
+COMMENT ON COLUMN financial.portfolios.pending_buy_lock IS
+  'Tong tien dang lock cho pending BUY orders (MAP-01). buying_power = available_cash - pending_buy_lock';
+
+-- CHECK constraint (D-07) — defense-in-depth
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'chk_pending_buy_lock_nonneg'
+  ) THEN
+    ALTER TABLE financial.portfolios
+      ADD CONSTRAINT chk_pending_buy_lock_nonneg CHECK (pending_buy_lock >= 0);
+  END IF;
+END $$;
