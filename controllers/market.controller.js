@@ -110,14 +110,19 @@ export const getPositionFormSpec = (req, res) => {
 };
 
 // Get all symbols
+// Phase 5 MDI-03: always filter delisted/disabled. Query param `is_enabled=false`
+// vẫn ignored — server authority, không cho client override.
 export const getSymbols = async (req, res, next) => {
   try {
-    const { exchange, type, is_enabled } = req.query;
+    const { exchange, type } = req.query;
 
+    // Backward-compat: is_enabled/is_listed IS NULL coi như TRUE (cho môi trường
+    // chưa apply migration 014, hoặc rows seed chưa set flag tường minh).
     let queryText = `
       SELECT symbol, exchange
       FROM ${MARKET_SCHEMA}.symbols
-      WHERE 1=1
+      WHERE (is_enabled IS NULL OR is_enabled = TRUE)
+        AND (is_listed IS NULL OR is_listed = TRUE)
     `;
 
     const params = [];
@@ -131,11 +136,6 @@ export const getSymbols = async (req, res, next) => {
     if (type) {
       queryText += ` AND symbol_type = $${paramIndex++}`;
       params.push(type);
-    }
-
-    if (is_enabled !== undefined) {
-      queryText += ` AND is_enabled = $${paramIndex++}`;
-      params.push(is_enabled === 'true');
     }
 
     queryText += ` ORDER BY symbol ASC`;
@@ -162,11 +162,13 @@ export const getSymbolInfo = async (req, res, next) => {
     if (!raw) {
       return res.status(400).json({ success: false, message: 'Symbol is required' });
     }
+    // Phase 5 MDI-03: filter delisted + disabled. is_listed IS NULL → backward-compat TRUE.
     const result = await query(
       `SELECT symbol, exchange
        FROM ${MARKET_SCHEMA}.symbols
        WHERE UPPER(TRIM(symbol)) = UPPER($1)
          AND (is_enabled IS NULL OR is_enabled = true)
+         AND (is_listed IS NULL OR is_listed = true)
        LIMIT 1`,
       [raw]
     );
@@ -249,11 +251,15 @@ export const getEntryInfo = async (req, res, next) => {
     }
     const quantityQuery = req.query.quantity != null ? parseFloat(req.query.quantity) : null;
 
+    // Phase 5 MDI-03: symbol lookup cũng filter delisted để không cho tạo order mã đã huỷ niêm yết.
     let exchangeFromDb = null;
     try {
       const dbResult = await query(
         `SELECT exchange FROM ${MARKET_SCHEMA}.symbols
-         WHERE UPPER(TRIM(symbol)) = UPPER($1) AND (is_enabled IS NULL OR is_enabled = true) LIMIT 1`,
+         WHERE UPPER(TRIM(symbol)) = UPPER($1)
+           AND (is_enabled IS NULL OR is_enabled = true)
+           AND (is_listed IS NULL OR is_listed = true)
+         LIMIT 1`,
         [raw]
       );
       if (dbResult.rows.length) exchangeFromDb = (dbResult.rows[0].exchange || '').toString().toUpperCase();
