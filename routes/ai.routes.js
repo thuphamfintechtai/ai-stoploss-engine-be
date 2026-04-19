@@ -1,5 +1,6 @@
 import express from 'express';
 import { authenticateToken } from '../middleware/auth.js';
+import { aiRateLimit } from '../middleware/aiRateLimit.js';
 import {
   suggestSLTP,
   analyzeMarketTrend,
@@ -29,6 +30,9 @@ const router = express.Router();
 
 // Tất cả AI routes cần xác thực
 router.use(authenticateToken);
+
+// AIT-05 (D-05): Rate limit per-user 10 calls / 10 phút. Skip /health trong middleware.
+router.use(aiRateLimit);
 
 /**
  * POST /api/ai/suggest-sltp
