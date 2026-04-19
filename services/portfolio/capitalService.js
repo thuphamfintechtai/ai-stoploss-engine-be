@@ -37,35 +37,154 @@ export function addBusinessDays(date, days) {
   return current;
 }
 
+/**
+ * CapitalService — quan ly dong tien portfolio (MAP-01, MAP-02).
+ *
+ * Khai niem:
+ *   - available_cash       : tien kha dung (co the dung de mua ngay)
+ *   - pending_settlement_cash : tien cho T+2 settlement sau khi ban
+ *   - pending_buy_lock     : tien dang lock cho pending BUY orders (MAP-01, D-05)
+ *   - buying_power         : = available_cash - pending_buy_lock (suc mua thuc te)
+ *
+ * MAP-05 D-06 LOCKED scope: money math trong file nay dung Math.round(Number(x)).
+ * KHONG dung parseFloat cong don — van de precision floating point.
+ */
 class CapitalService {
   /**
-   * Tru available_cash khi mua (bao gom phi)
-   * Dung SELECT FOR UPDATE de tranh race condition
+   * Lock/tru tien khi tao BUY order.
+   *
    * @param {string} portfolioId
-   * @param {number} totalCost - Tong chi phi mua (gia * so luong + phi)
+   * @param {number} totalCost - Tong chi phi mua (gia * so luong + phi), VND
+   * @param {string} [state='FILLED'] - 'FILLED' (default) tru available_cash;
+   *                                    'PENDING' tang pending_buy_lock (chua tru cash).
+   * @throws 422 neu khong du tien (hoac khong du buying_power cho PENDING)
+   * @throws Error neu state khong hop le
    */
-  static async deductForBuy(portfolioId, totalCost) {
+  static async deductForBuy(portfolioId, totalCost, state = 'FILLED') {
+    if (state !== 'FILLED' && state !== 'PENDING') {
+      throw new Error('Invalid state: ' + state + ' (expected FILLED or PENDING)');
+    }
     return transaction(async (client) => {
       const { rows } = await client.query(
-        `SELECT available_cash FROM financial.portfolios WHERE id = $1 FOR UPDATE`,
+        `SELECT available_cash, pending_buy_lock FROM financial.portfolios WHERE id = $1 FOR UPDATE`,
         [portfolioId]
       );
-      const available = parseFloat(rows[0]?.available_cash);
-      if (isNaN(available) || available < totalCost) {
+      if (!rows[0]) {
         const err = new Error('Khong du tien mat kha dung');
         err.statusCode = 422;
         throw err;
       }
+      const available = Math.round(Number(rows[0].available_cash));
+      const pending = Math.round(Number(rows[0].pending_buy_lock));
+
+      if (state === 'FILLED') {
+        if (!Number.isFinite(available) || available < totalCost) {
+          const err = new Error('Khong du tien mat kha dung');
+          err.statusCode = 422;
+          throw err;
+        }
+        await client.query(
+          `UPDATE financial.portfolios SET available_cash = available_cash - $2, updated_at = NOW() WHERE id = $1`,
+          [portfolioId, totalCost]
+        );
+      } else {
+        // state === 'PENDING'
+        const buyingPower = available - pending;
+        if (!Number.isFinite(buyingPower) || buyingPower < totalCost) {
+          const err = new Error('Khong du suc mua (buying_power insufficient)');
+          err.statusCode = 422;
+          throw err;
+        }
+        await client.query(
+          `UPDATE financial.portfolios SET pending_buy_lock = pending_buy_lock + $2, updated_at = NOW() WHERE id = $1`,
+          [portfolioId, totalCost]
+        );
+      }
+    });
+  }
+
+  /**
+   * Confirm fill cho PENDING BUY order: chuyen tu lock sang spent trong 1 transaction.
+   * pending_buy_lock -= lockedAmount; available_cash -= actualCost.
+   *
+   * @param {string} portfolioId
+   * @param {number} actualCost - Chi phi thuc te khi khop (gia thuc * qty + fee thuc)
+   * @param {number} lockedAmount - So tien da lock truoc do (tu recordBuyOrder PENDING)
+   * @throws 404 neu portfolio khong ton tai
+   * @throws 422 neu insufficient lock hoac insufficient available_cash
+   */
+  static async confirmBuyFill(portfolioId, actualCost, lockedAmount) {
+    return transaction(async (client) => {
+      const { rows } = await client.query(
+        `SELECT available_cash, pending_buy_lock FROM financial.portfolios WHERE id = $1 FOR UPDATE`,
+        [portfolioId]
+      );
+      if (!rows[0]) {
+        const err = new Error('Portfolio not found');
+        err.statusCode = 404;
+        throw err;
+      }
+      const available = Math.round(Number(rows[0].available_cash));
+      const locked = Math.round(Number(rows[0].pending_buy_lock));
+
+      if (locked < lockedAmount) {
+        const err = new Error('Pending buy lock insufficient');
+        err.statusCode = 422;
+        throw err;
+      }
+      if (available < actualCost) {
+        const err = new Error('Khong du tien mat kha dung (confirmBuyFill)');
+        err.statusCode = 422;
+        throw err;
+      }
+
       await client.query(
-        `UPDATE financial.portfolios SET available_cash = available_cash - $2, updated_at = NOW() WHERE id = $1`,
-        [portfolioId, totalCost]
+        `UPDATE financial.portfolios
+         SET available_cash = available_cash - $2,
+             pending_buy_lock = pending_buy_lock - $3,
+             updated_at = NOW()
+         WHERE id = $1`,
+        [portfolioId, actualCost, lockedAmount]
       );
     });
   }
 
   /**
-   * Them tien vao pending_settlement_cash va tao settlement_events record
-   * Goi khi ban: tien chua kha dung ngay, cho T+2
+   * Release lock khi cancel/expire pending BUY order.
+   * pending_buy_lock -= amount (available_cash KHONG doi).
+   *
+   * @param {string} portfolioId
+   * @param {number} amount - So tien can release
+   * @throws 404 neu portfolio khong ton tai
+   * @throws 422 neu locked < amount
+   */
+  static async releaseBuyLock(portfolioId, amount) {
+    return transaction(async (client) => {
+      const { rows } = await client.query(
+        `SELECT pending_buy_lock FROM financial.portfolios WHERE id = $1 FOR UPDATE`,
+        [portfolioId]
+      );
+      if (!rows[0]) {
+        const err = new Error('Portfolio not found');
+        err.statusCode = 404;
+        throw err;
+      }
+      const locked = Math.round(Number(rows[0].pending_buy_lock));
+      if (locked < amount) {
+        const err = new Error('Pending buy lock insufficient for release');
+        err.statusCode = 422;
+        throw err;
+      }
+      await client.query(
+        `UPDATE financial.portfolios SET pending_buy_lock = pending_buy_lock - $2, updated_at = NOW() WHERE id = $1`,
+        [portfolioId, amount]
+      );
+    });
+  }
+
+  /**
+   * Them tien vao pending_settlement_cash va tao settlement_events record.
+   * Goi khi ban: tien chua kha dung ngay, cho T+2.
    * @param {string} portfolioId
    * @param {number} netAmount - So tien thuan sau phi ban
    * @param {Date} settlementDate - Ngay T+2 tinh theo ngay lam viec VN
@@ -84,12 +203,11 @@ class CapitalService {
   }
 
   /**
-   * Xu ly cac settlement events den han: chuyen tu pending sang available
-   * Duoc goi boi settlement worker moi ngay 9AM
+   * Xu ly cac settlement events den han: chuyen tu pending sang available.
+   * Duoc goi boi settlement worker moi ngay 9AM.
    * @returns {number} So settlement da xu ly
    */
   static async processSettlements() {
-    // Query pending events where settlement_date <= today
     const { rows: pendingEvents } = await query(
       `SELECT * FROM financial.settlement_events WHERE status = 'PENDING' AND settlement_date <= CURRENT_DATE`
     );
@@ -111,22 +229,39 @@ class CapitalService {
   }
 
   /**
-   * Lay so du hien tai cua portfolio
+   * Lay so du hien tai cua portfolio.
+   *
+   * MAP-05 D-06 LOCKED: integer VND math (Math.round(Number(x))) — khong parseFloat cong don.
+   *
    * @param {string} portfolioId
-   * @returns {{ total_balance, available_cash, pending_settlement_cash, deployed_cash } | null}
+   * @returns {{
+   *   total_balance: number,
+   *   available_cash: number,
+   *   pending_settlement_cash: number,
+   *   pending_buy_lock: number,
+   *   buying_power: number,
+   *   deployed_cash: number
+   * } | null}
    */
   static async getBalance(portfolioId) {
     const { rows } = await query(
-      `SELECT total_balance, available_cash, pending_settlement_cash FROM financial.portfolios WHERE id = $1`,
+      `SELECT total_balance, available_cash, pending_settlement_cash, pending_buy_lock
+       FROM financial.portfolios WHERE id = $1`,
       [portfolioId]
     );
     if (!rows[0]) return null;
-    const { total_balance, available_cash, pending_settlement_cash } = rows[0];
+    const r = rows[0];
+    const total = Math.round(Number(r.total_balance));
+    const avail = Math.round(Number(r.available_cash));
+    const pendSettle = Math.round(Number(r.pending_settlement_cash));
+    const pendLock = Math.round(Number(r.pending_buy_lock));
     return {
-      total_balance: parseFloat(total_balance),
-      available_cash: parseFloat(available_cash),
-      pending_settlement_cash: parseFloat(pending_settlement_cash),
-      deployed_cash: parseFloat(total_balance) - parseFloat(available_cash) - parseFloat(pending_settlement_cash),
+      total_balance: total,
+      available_cash: avail,
+      pending_settlement_cash: pendSettle,
+      pending_buy_lock: pendLock,
+      buying_power: avail - pendLock,
+      deployed_cash: total - avail - pendSettle,
     };
   }
 }
