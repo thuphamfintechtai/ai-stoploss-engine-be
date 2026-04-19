@@ -3,6 +3,8 @@
  * Sử dụng @google/generative-ai (đã có trong dependencies).
  */
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { validateAiResponse } from './ai/aiResponseSchemas.js';
+import { snapAndClampPrices, snapAndClampReview } from './ai/aiPostProcess.js';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
@@ -60,6 +62,71 @@ export async function callGeminiJSON(prompt) {
     err.rawText = text;
     throw err;
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Validated Gemini wrapper — AIT-01 + AIT-02 (D-01 + D-02)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Pick allowed price fields từ payload object để đưa vào snapAndClampPrices.
+ * @param {object} obj
+ * @param {Array<string>} fields
+ * @returns {object} subset chỉ chứa các field có trong obj
+ */
+function _pickFields(obj, fields) {
+  if (!obj || typeof obj !== 'object' || !Array.isArray(fields)) return {};
+  const out = {};
+  for (const f of fields) {
+    if (obj[f] !== undefined) out[f] = obj[f];
+  }
+  return out;
+}
+
+/**
+ * Gọi Gemini → parse JSON → validate Joi schema → snap+clamp giá (nếu có priceFields).
+ *
+ * Khi schema reject: throw `AI_SCHEMA_REJECT: <message>` — caller catch để fallback rule-based.
+ * Khi snap+clamp clamp field: merge `_clamped` / `_original` / `_clamp_meta` vào payload trả về
+ * (FE dùng để render badge "⚡ giá đã điều chỉnh theo biên độ sàn" — AIT-02).
+ *
+ * @param {string} prompt
+ * @param {string} schemaKey - Key trong AI_SCHEMAS ('signal'|'sltp'|'review'|'trend'|'evaluateRisk'|'regime')
+ * @param {object} [options]
+ * @param {string} [options.exchange='HOSE']
+ * @param {number|null} [options.referencePrice=null]
+ * @param {Array<string>} [options.priceFields=[]]  - Các field giá cần snap+clamp
+ * @returns {Promise<object>} Parsed + validated + adjusted payload
+ */
+export async function callGeminiJSONValidated(prompt, schemaKey, options = {}) {
+  const { exchange = 'HOSE', referencePrice = null, priceFields = [] } = options;
+
+  const raw = await callGeminiJSON(prompt);
+  const { ok, value, errors } = validateAiResponse(schemaKey, raw);
+  if (!ok) {
+    const firstMsg = errors && errors[0] ? errors[0].message : 'unknown';
+    console.warn(`[AI schema reject] ${schemaKey}: ${firstMsg}`);
+    const err = new Error(`AI_SCHEMA_REJECT: ${firstMsg}`);
+    err.schemaKey = schemaKey;
+    err.validationErrors = errors;
+    throw err;
+  }
+
+  if (!priceFields.length) return value;
+
+  const pickedPrices = _pickFields(value, priceFields);
+  const { adjusted, clamped, original, meta } = snapAndClampPrices(pickedPrices, {
+    exchange,
+    referencePrice,
+  });
+
+  return {
+    ...value,
+    ...adjusted,
+    _clamped: clamped,
+    _original: original,
+    _clamp_meta: meta,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -377,7 +444,8 @@ Hãy phân tích và trả về JSON (không có markdown fence):
 }`;
 
   try {
-    const result = await callGeminiJSON(prompt);
+    // analyzeTrend: validate schema only — support/resistance arrays không clamp (informational).
+    const result = await callGeminiJSONValidated(prompt, 'trend', { exchange });
     return { ...result, ai_source: 'gemini' };
   } catch (_err) {
     console.warn('[AI] analyzeTrend Gemini fallback:', _err.message);
@@ -475,7 +543,8 @@ Hãy đánh giá rủi ro toàn diện và trả về JSON (không có markdown 
 }`;
 
   try {
-    const result = await callGeminiJSON(prompt);
+    // evaluateTradeRisk: validate schema, không suggest giá mới → không cần snap/clamp.
+    const result = await callGeminiJSONValidated(prompt, 'evaluateRisk');
     return { ...result, ai_source: 'gemini' };
   } catch (_err) {
     console.warn('[AI] evaluateTradeRisk Gemini fallback:', _err.message);
@@ -584,7 +653,7 @@ export async function generateSmartAlerts(positions, currentPrices = {}) {
  * @param {object} [params.companyInfo] - Thông tin công ty (tùy chọn)
  * @returns {Promise<object>} Tín hiệu giao dịch
  */
-export async function generateSignal({ symbol, exchange, currentPrice, ohlcvData = [], companyInfo = null }) {
+export async function generateSignal({ symbol, exchange = 'HOSE', currentPrice, ohlcvData = [], companyInfo = null }) {
   const recentCandles = ohlcvData.slice(-30);
   const closes = recentCandles.map(c => c.close);
   const highs = recentCandles.map(c => c.high);
@@ -633,7 +702,12 @@ Trả về JSON tín hiệu giao dịch (không có markdown fence):
 }`;
 
   try {
-    const result = await callGeminiJSON(prompt);
+    // generateSignal: validate + snap/clamp entry/SL/TP với currentPrice là reference.
+    const result = await callGeminiJSONValidated(prompt, 'signal', {
+      exchange,
+      referencePrice: currentPrice,
+      priceFields: ['entry_price', 'stop_loss', 'take_profit'],
+    });
     return { ...result, ai_source: 'gemini' };
   } catch (_err) {
     console.warn('[AI] generateSignal Gemini fallback:', _err.message);
@@ -800,9 +874,28 @@ Trả về JSON array (không markdown fence):
 ]`;
 
   try {
-    const result = await callGeminiJSON(prompt);
-    const arr = Array.isArray(result) ? result : (result ? [result] : []);
-    return arr.map(item => ({ ...item, ai_source: 'gemini' }));
+    // reviewOpenPositions: parse → validate review schema → snap/clamp từng item theo entry_price của position.
+    const rawResult = await callGeminiJSON(prompt);
+    const rawArr = Array.isArray(rawResult) ? rawResult : (rawResult ? [rawResult] : []);
+
+    const { ok, value, errors } = validateAiResponse('review', rawArr);
+    if (!ok) {
+      const firstMsg = errors && errors[0] ? errors[0].message : 'unknown';
+      console.warn(`[AI schema reject] review: ${firstMsg}`);
+      const err = new Error(`AI_SCHEMA_REJECT: ${firstMsg}`);
+      err.schemaKey = 'review';
+      err.validationErrors = errors;
+      throw err;
+    }
+
+    const pricesByPosition = Object.fromEntries(
+      positionDetails.map(p => [
+        p.position_id,
+        { entry_price: p.entry_price, exchange: p.exchange || 'HOSE' },
+      ])
+    );
+    const adjusted = snapAndClampReview(value, pricesByPosition);
+    return adjusted.map(item => ({ ...item, ai_source: 'gemini' }));
   } catch (_err) {
     console.warn('[AI] reviewOpenPositions Gemini fallback:', _err.message);
     return positionDetails.map(pos => ({
@@ -901,7 +994,8 @@ Trả về JSON (không markdown fence):
 }`;
 
   try {
-    const result = await callGeminiJSON(prompt);
+    // detectMarketRegime: validate schema, không suggest giá stock cụ thể → không cần snap/clamp.
+    const result = await callGeminiJSONValidated(prompt, 'regime');
     return { ...result, ai_source: 'gemini' };
   } catch (_err) {
     console.warn('[AI] detectMarketRegime Gemini fallback:', _err.message);

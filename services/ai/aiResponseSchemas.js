@@ -180,6 +180,29 @@ export const evaluateRiskSchema = Joi.object({
   summary: Joi.string().min(5).required(),
 }).unknown(true);
 
+// ─── regimeSchema — detectMarketRegime output ──────────────────────────────
+
+/**
+ * Gemini output cho detectMarketRegime — phải có regime enum + confidence + risk_level.
+ * vnindex_outlook tiếng Việt (Gemini quen với prompt VN).
+ */
+export const regimeSchema = Joi.object({
+  regime: Joi.string().valid('BULL', 'BEAR', 'SIDEWAYS', 'VOLATILE').required(),
+  confidence: confidence0to100.required(),
+  description: Joi.string().allow(''),
+  vnindex_outlook: Joi.string()
+    .valid('TÍCH CỰC', 'TIÊU CỰC', 'TRUNG LẬP')
+    .required(),
+  recommendations: Joi.array().items(Joi.string()),
+  risk_level: verySeriousRiskLevelEnum.required(),
+  sector_focus: Joi.string().allow(''),
+  key_levels: Joi.object({
+    support: Joi.alternatives().try(nonNegativeNumber, Joi.valid(null)),
+    resistance: Joi.alternatives().try(nonNegativeNumber, Joi.valid(null)),
+  }).unknown(true),
+  market_bias: Joi.string().allow(''),
+}).unknown(true);
+
 // ─── Schema registry + helper ──────────────────────────────────────────────
 
 export const AI_SCHEMAS = {
@@ -188,6 +211,7 @@ export const AI_SCHEMAS = {
   review: reviewSchema,
   trend: trendSchema,
   evaluateRisk: evaluateRiskSchema,
+  regime: regimeSchema,
 };
 
 /** Extra cross-field validators theo schemaKey (chạy post Joi pass). */
@@ -249,4 +273,5 @@ export default {
   reviewSchema,
   trendSchema,
   evaluateRiskSchema,
+  regimeSchema,
 };
