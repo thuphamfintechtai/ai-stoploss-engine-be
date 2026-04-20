@@ -1,6 +1,7 @@
 import express from 'express';
 import * as marketController from '../controllers/market.controller.js';
 import { validateQuery } from '../middleware/validation.js';
+import { symbolInfoRateLimit } from '../middleware/symbolInfoRateLimit.js';
 
 const router = express.Router();
 
@@ -9,7 +10,8 @@ const router = express.Router();
 router.get('/position-form-spec', marketController.getPositionFormSpec);
 router.get('/stocks', marketController.getStocks);
 router.get('/symbols', marketController.getSymbols);
-router.get('/symbols/:symbol/info', marketController.getSymbolInfo);
+// MDI-08 (T-05-11): per-IP rate limit 60 req/min cho symbol info (endpoint public, dễ spam)
+router.get('/symbols/:symbol/info', symbolInfoRateLimit, marketController.getSymbolInfo);
 router.get('/symbols/:symbol/entry-info', marketController.getEntryInfo);
 router.get('/symbols/:symbol/detail', marketController.getSymbolDetail);
 router.get('/symbols/:symbol/price', marketController.getPrice);
