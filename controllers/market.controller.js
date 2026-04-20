@@ -1000,6 +1000,85 @@ export const getIntradayMarketIndices = async (req, res, next) => {
 };
 
 /**
+ * GET /market/indices — MDI-06 (T-05-12, T-05-14)
+ *
+ * Normalized dashboard endpoint cho 3 index chính VN: VNINDEX, VN30, HNXINDEX.
+ * Shape cố định { indexCode, success, value, change, changePercent, timestamp } —
+ * thiết kế cho dashboard header, không trùng với /intraday-indices (trả raw VPBS).
+ *
+ * Graceful degrade qua Promise.allSettled:
+ *  - Partial fail → 200 với per-item success flag (T-05-14).
+ *  - Toàn bộ 3 fail → 503 code=UPSTREAM_UNAVAILABLE.
+ */
+const DASHBOARD_INDEX_CODES = ['VNINDEX', 'VN30', 'HNXINDEX'];
+
+export const getMarketIndices = async (req, res, next) => {
+  try {
+    const codes = DASHBOARD_INDEX_CODES;
+    const results = await Promise.allSettled(
+      codes.map((code) =>
+        fetchJson(`${VPBANK_MARKET_BASE_URL}/intradayMarketIndex?indexCode=${encodeURIComponent(code)}`)
+      )
+    );
+
+    const data = results.map((r, i) => {
+      const indexCode = codes[i];
+      if (r.status !== 'fulfilled') {
+        return {
+          indexCode,
+          success: false,
+          error: r.reason?.message || 'Upstream fetch failed',
+        };
+      }
+      // Unwrap VPBS payload: data.data (object hoặc array-like), field naming khớp getMarketIndexDetail.
+      const payload = r.value.data?.data ?? r.value.data ?? {};
+      const node = Array.isArray(payload) ? (payload[0] ?? {}) : payload;
+      const value = toNum(node.indexValue) ?? toNum(node.value) ?? toNum(node.close);
+      const change = toNum(node.indexChange) ?? toNum(node.change);
+      const changePercent = toNum(node.indexPercentChange) ?? toNum(node.percentChange);
+      const timestamp = (node.indexTime ?? node.time ?? '').toString().trim() || null;
+
+      // Heuristic: nếu cả 3 số đều null → coi như upstream trả shape rỗng / không hợp lệ.
+      if (value == null && change == null && changePercent == null) {
+        return {
+          indexCode,
+          success: false,
+          error: 'No index data in upstream response',
+        };
+      }
+
+      return {
+        indexCode,
+        success: true,
+        value,
+        change,
+        changePercent,
+        timestamp,
+      };
+    });
+
+    const allFailed = data.every((d) => !d.success);
+    if (allFailed) {
+      return res.status(503).json({
+        success: false,
+        message: 'Market indices temporarily unavailable. Please try again in a moment.',
+        code: 'UPSTREAM_UNAVAILABLE',
+      });
+    }
+
+    res.json({
+      success: true,
+      data,
+      timestamp: new Date().toISOString(),
+      source: 'VPBank',
+    });
+  } catch (error) {
+    console.error('VPBank API Error (getMarketIndices):', error);
+    next(error);
+  }
+};
+
+/**
  * GET /market/market-index-detail
  * Tóm tắt chỉ số (Neopro marketIndexDetail). Query: indexCode=VNINDEX,VN30,VNXALL,HNX30,...
  * Trả về: indexCode, indexValue, indexChange, sumVolume, sumValue, advances, declines, noChange.
@@ -2056,6 +2135,7 @@ export default {
   getOrderBook,
   getIntradayMarketIndex,
   getIntradayMarketIndices,
+  getMarketIndices,
   getMarketIndexDetail,
   getCafefNews,
   getCorpBondList,

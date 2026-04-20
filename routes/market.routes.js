@@ -28,6 +28,8 @@ router.get('/symbols/:symbol/indicators', marketController.getIndicators);
 router.get('/overview', marketController.getOverview);
 router.get('/intraday-index', marketController.getIntradayMarketIndex);
 router.get('/intraday-indices', marketController.getIntradayMarketIndices);
+// MDI-06: normalized dashboard endpoint — VNINDEX + VN30 + HNXINDEX với shape chuẩn hoá
+router.get('/indices', marketController.getMarketIndices);
 router.get('/market-index-detail', marketController.getMarketIndexDetail);
 router.get('/news', marketController.getCafefNews);
 
