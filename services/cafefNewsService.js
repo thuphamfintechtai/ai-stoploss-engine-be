@@ -166,11 +166,14 @@ function parseCafefMarkdown(markdown, limit, search) {
   return filtered.slice(0, limit);
 }
 
+// Phase 5 MDI-05: audit verify — regex anchored cafef.vn/ với escaped dot + slash.
+// Chặn spoof evil.com-cafef.vn, suffix cafef.vn.evil.com, tag listing, short fragments.
+// Coverage: tests/services/cafefRegex.test.js (8 regex + 1 integration scenarios).
 // URL tin bài CafeF: dạng ...-188260214103735065.chn hoặc .cafef, hoặc path có id
-const ARTICLE_URL_STRICT = /cafef\.vn\/[^"?#]+-\d{12,}\.(chn|cafef)/i;
-const ARTICLE_URL_RELAXED = /cafef\.vn\/[^"?#\s]+/i; // bất kỳ path cafef.vn (fallback khi strict không match)
+export const ARTICLE_URL_STRICT = /cafef\.vn\/[^"?#]+-\d{12,}\.(chn|cafef)/i;
+export const ARTICLE_URL_RELAXED = /cafef\.vn\/[^"?#\s]+/i; // bất kỳ path cafef.vn (fallback khi strict không match)
 
-function parseCafefHTML(html, limit, search) {
+export function parseCafefHTML(html, limit, search) {
   const articles = [];
   if (!html || typeof html !== 'string') return articles;
 
