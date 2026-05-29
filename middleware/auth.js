@@ -6,6 +6,16 @@ export const authenticateToken = async (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
 
+    // DEBUG: Log auth info
+    console.log('[AUTH DEBUG]', {
+      path: req.path,
+      hasAuthHeader: !!authHeader,
+      tokenLength: token?.length,
+      tokenPrefix: token?.substring(0, 20) + '...',
+      jwtSecretSet: !!process.env.JWT_SECRET,
+      jwtSecretLength: process.env.JWT_SECRET?.length
+    });
+
     if (!token) {
       return res.status(401).json({
         success: false,
@@ -14,6 +24,7 @@ export const authenticateToken = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log('[AUTH DEBUG] Decoded:', decoded);
 
     // Verify user still exists
     const user = await User.findById(decoded.userId);
