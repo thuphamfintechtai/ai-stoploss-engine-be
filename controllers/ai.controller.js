@@ -293,6 +293,16 @@ export async function suggestSLTP(req, res, next) {
       };
     }
 
+    // Flatten technical_score object to separate fields for FE compatibility
+    const techScore = result.technical_score;
+    const flattenedTechScore = typeof techScore === 'object' && techScore !== null
+      ? {
+          technical_score: techScore.score ?? null,
+          technical_label: techScore.label ?? null,
+          score_methodology: techScore.methodology ?? null,
+        }
+      : { technical_score: techScore ?? null };
+
     res.json({
       success: true,
       data: {
@@ -306,6 +316,7 @@ export async function suggestSLTP(req, res, next) {
         position_sizing: positionSizing,
         recommendation_id: savedRec?.id ?? null,
         ...result,
+        ...flattenedTechScore,
         ...probabilityTPFields
       }
     });
