@@ -78,6 +78,16 @@ class CapitalService {
       const pending = Math.round(Number(rows[0].pending_buy_lock));
 
       if (state === 'FILLED') {
+        // DEBUG: Log capital check
+        console.log('[CAPITAL DEBUG]', {
+          portfolioId,
+          state,
+          available,
+          pending,
+          totalCost,
+          buyingPower: available - pending,
+          sufficient: available >= totalCost
+        });
         if (!Number.isFinite(available) || available < totalCost) {
           const err = new Error('Khong du tien mat kha dung');
           err.statusCode = 422;
@@ -90,6 +100,16 @@ class CapitalService {
       } else {
         // state === 'PENDING'
         const buyingPower = available - pending;
+        // DEBUG: Log capital check
+        console.log('[CAPITAL DEBUG]', {
+          portfolioId,
+          state,
+          available,
+          pending,
+          totalCost,
+          buyingPower,
+          sufficient: buyingPower >= totalCost
+        });
         if (!Number.isFinite(buyingPower) || buyingPower < totalCost) {
           const err = new Error('Khong du suc mua (buying_power insufficient)');
           err.statusCode = 422;
