@@ -1,6 +1,5 @@
 import express from 'express';
 import { authenticateToken } from '../middleware/auth.js';
-import { aiRateLimit } from '../middleware/aiRateLimit.js';
 import {
   suggestSLTP,
   analyzeMarketTrend,
@@ -14,6 +13,7 @@ import {
   getMarketRegime,
   getPositionReviewHistory,
   markReviewApplied,
+  markReviewDismissed,
   listRecommendations,
   getRecommendation,
   applyRecommendation,
@@ -31,8 +31,7 @@ const router = express.Router();
 // Tất cả AI routes cần xác thực
 router.use(authenticateToken);
 
-// AIT-05 (D-05): Rate limit per-user 10 calls / 10 phút. Skip /health trong middleware.
-router.use(aiRateLimit);
+// ── Gemini-calling endpoints ────────────────────────────────────────────
 
 /**
  * POST /api/ai/suggest-sltp
@@ -56,6 +55,50 @@ router.post('/analyze-trend', analyzeMarketTrend);
 router.post('/evaluate-risk', evaluateRisk);
 
 /**
+ * POST /api/ai/watchlist-analysis
+ * Phân tích AI on-demand cho mã trong watchlist
+ * Body: { symbol, exchange? }
+ */
+router.post('/watchlist-analysis', analyzeWatchlistSymbol);
+
+/**
+ * POST /api/ai/position-review
+ * AI review tất cả vị thế đang mở, đề xuất điều chỉnh SL/TP
+ * Body: { portfolio_id }
+ */
+router.post('/position-review', reviewPositions);
+
+/**
+ * POST /api/ai/market-regime
+ * Phát hiện chế độ thị trường (BULL/BEAR/SIDEWAYS/VOLATILE)
+ * Body: { force_refresh? }
+ */
+router.post('/market-regime', getMarketRegime);
+
+/**
+ * POST /api/ai/position-sizing
+ * Tinh half-Kelly position sizing dua tren lich su giao dich
+ * Body: { portfolio_id, symbol? }
+ */
+router.post('/position-sizing', getPositionSizing);
+
+/**
+ * POST /api/ai/monte-carlo
+ * Monte Carlo simulation 1000 paths — RISK-02
+ * Body: { portfolio_id, num_paths?, num_days? }
+ */
+router.post('/monte-carlo', getMonteCarloSimulation);
+
+/**
+ * POST /api/ai/stress-test
+ * Stress test scenarios -10/-15/-20% — RISK-03
+ * Body: { portfolio_id, custom_scenario? }
+ */
+router.post('/stress-test', getStressTestResult);
+
+// ── Read-only endpoints ────────────────────────────────────────────────
+
+/**
  * GET /api/ai/signals
  * Lấy danh sách tín hiệu AI chưa hết hạn
  * Query: { symbol?, limit?, offset? }
@@ -77,31 +120,10 @@ router.get('/dashboard', getDashboardSummary);
 router.get('/evaluations', getEvaluations);
 
 /**
- * POST /api/ai/watchlist-analysis
- * Phân tích AI on-demand cho mã trong watchlist
- * Body: { symbol, exchange? }
- */
-router.post('/watchlist-analysis', analyzeWatchlistSymbol);
-
-/**
  * GET /api/ai/watchlist-history?symbol=ACB&limit=20
  * Lịch sử phân tích AI cho một mã
  */
 router.get('/watchlist-history', getWatchlistHistory);
-
-/**
- * POST /api/ai/position-review
- * AI review tất cả vị thế đang mở, đề xuất điều chỉnh SL/TP
- * Body: { portfolio_id }
- */
-router.post('/position-review', reviewPositions);
-
-/**
- * POST /api/ai/market-regime
- * Phát hiện chế độ thị trường (BULL/BEAR/SIDEWAYS/VOLATILE)
- * Body: { force_refresh? }
- */
-router.post('/market-regime', getMarketRegime);
 
 /**
  * GET /api/ai/position-review-history?portfolio_id=...&limit=20
@@ -114,6 +136,12 @@ router.get('/position-review-history', getPositionReviewHistory);
  * Đánh dấu đã áp dụng đề xuất (tăng applied_count)
  */
 router.patch('/position-review-history/:id/applied', markReviewApplied);
+
+/**
+ * PATCH /api/ai/position-review-history/:id/dismissed
+ * Tăng dismiss_count cho phase 07 feedback loop
+ */
+router.patch('/position-review-history/:id/dismissed', markReviewDismissed);
 
 /**
  * GET /api/ai/recommendations?limit=20
@@ -130,16 +158,9 @@ router.get('/recommendations/:id', getRecommendation);
 /**
  * POST /api/ai/recommendations/:id/apply
  * Body: { selected_level: 'aggressive' | 'moderate' | 'conservative' }
- * Đánh dấu user đã áp dụng recommendation
+ * Đánh dấu user đã áp dụng recommendation (DB update only)
  */
 router.post('/recommendations/:id/apply', applyRecommendation);
-
-/**
- * POST /api/ai/position-sizing
- * Tinh half-Kelly position sizing dua tren lich su giao dich
- * Body: { portfolio_id, symbol? }
- */
-router.post('/position-sizing', getPositionSizing);
 
 /**
  * GET /api/ai/risk-budget?portfolio_id=xxx
@@ -160,20 +181,6 @@ router.get('/rebalancing', getRebalancingSuggestions);
  * Historical VaR calculation — RISK-01
  */
 router.get('/var', getVaR);
-
-/**
- * POST /api/ai/monte-carlo
- * Monte Carlo simulation 1000 paths — RISK-02
- * Body: { portfolio_id, num_paths?, num_days? }
- */
-router.post('/monte-carlo', getMonteCarloSimulation);
-
-/**
- * POST /api/ai/stress-test
- * Stress test scenarios -10/-15/-20% — RISK-03
- * Body: { portfolio_id, custom_scenario? }
- */
-router.post('/stress-test', getStressTestResult);
 
 /**
  * GET /api/ai/sector-concentration?portfolio_id=xxx

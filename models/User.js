@@ -17,7 +17,7 @@ class User {
 
   static async findById(id) {
     const result = await query(
-      `SELECT id, email, username, full_name, created_at, updated_at
+      `SELECT id, email, username, full_name, settings, created_at, updated_at
        FROM users WHERE id = $1`,
       [id]
     );

@@ -10,10 +10,10 @@ import { logAiCall } from './ai/auditLogger.js';
 import { enrichSymbolContext } from './ai/promptContextEnricher.js';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
 // Timeout cho Gemini calls — fallback rule-based khi vượt quá
-const GEMINI_TIMEOUT_MS = 5000;
+const GEMINI_TIMEOUT_MS = parseInt(process.env.GEMINI_TIMEOUT_MS, 20) || 150000000;
 
 let genAI = null;
 let aiModel = null;
@@ -31,18 +31,6 @@ function getModel() {
   return aiModel;
 }
 
-/**
- * Gọi Gemini và trả về JSON đã parse.
- * Prompt phải yêu cầu AI trả JSON thuần (không có markdown fence).
- * Có timeout 5 giây — throw Error('Gemini timeout after 5s') để callers có thể catch và fallback.
- *
- * AIT-09 (D-09): Neu auditContext = { userId, endpoint } duoc truyen →
- * fire-and-forget insert ai_audit_log cho ca success + error path.
- *
- * @param {string} prompt
- * @param {{userId?: string, endpoint?: string} | null} [auditContext=null]
- * @returns {Promise<any>} Parsed JSON
- */
 export async function callGeminiJSON(prompt, auditContext = null) {
   const model = getModel();
   const started = Date.now();
@@ -892,7 +880,7 @@ Trả về JSON (không có markdown fence):
  * @param {object} params.currentPrices - { symbol: priceVND }
  * @returns {Promise<Array>} Danh sách khuyến nghị
  */
-export async function reviewOpenPositions({ positions, currentPrices, userId = null }) {
+export async function reviewOpenPositions({ positions, currentPrices, userId = null, extraContextHeader = '' }) {
   if (!positions || positions.length === 0) return [];
 
   const positionDetails = positions.map(pos => {
@@ -950,7 +938,7 @@ export async function reviewOpenPositions({ positions, currentPrices, userId = n
   const combinedHeader = ctxResults.map(c => c.header).filter(Boolean).join('\n---\n');
   const contextBlock = combinedHeader ? combinedHeader + '\n\n' : '';
 
-  const prompt = contextBlock + `Bạn là chuyên gia quản lý rủi ro và giao dịch chứng khoán Việt Nam với 20 năm kinh nghiệm. Review các vị thế đang mở và đưa ra khuyến nghị hành động cụ thể.
+  const prompt = extraContextHeader + contextBlock + `Bạn là chuyên gia quản lý rủi ro và giao dịch chứng khoán Việt Nam với 20 năm kinh nghiệm. Review các vị thế đang mở và đưa ra khuyến nghị hành động cụ thể.
 
 Danh sách vị thế cần review:
 ${JSON.stringify(positionDetails, null, 2)}

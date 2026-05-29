@@ -915,6 +915,24 @@ export async function markReviewApplied(req, res, next) {
   }
 }
 
+export async function markReviewDismissed(req, res, next) {
+  try {
+    const { id } = req.params;
+    const r = await query(
+      `UPDATE ${DB_SCHEMA}.ai_position_reviews
+       SET dismiss_count = dismiss_count + 1
+       WHERE id = $1 AND user_id = $2`,
+      [id, req.user.userId],
+    );
+    if (r.rowCount === 0) {
+      return res.status(404).json({ success: false, message: 'Review không tồn tại hoặc không thuộc user' });
+    }
+    res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+}
+
 /**
  * POST /api/ai/market-regime
  * Phát hiện chế độ thị trường từ dữ liệu VNINDEX

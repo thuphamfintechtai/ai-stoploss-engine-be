@@ -608,12 +608,296 @@ async function recalculateDynamicSLJob() {
   }
 }
 
+// ─── AI Proactive Position Review (Phase 06, PAPER-only) ──────────────────────
+
+const AI_REVIEW_CRON         = process.env.AI_REVIEW_CRON || '*/10 9-15 * * 1-5';
+const AI_REVIEW_DEDUPE_TTL_MS = 60 * 60 * 1000;
+const AI_REVIEW_BUDGET_CAP_USD = parseFloat(process.env.AI_REVIEW_BUDGET_CAP || '1.0');
+
+const geminiCircuitBreaker = {
+  failures:        0,
+  pausedUntil:     0,
+  FAIL_THRESHOLD:  3,
+  PAUSE_MS:        10 * 60 * 1000,
+  isOpen() { return Date.now() < this.pausedUntil; },
+  recordFailure() {
+    this.failures += 1;
+    if (this.failures >= this.FAIL_THRESHOLD) {
+      this.pausedUntil = Date.now() + this.PAUSE_MS;
+      console.warn(`[AI Review] Circuit OPEN until ${new Date(this.pausedUntil).toISOString()}`);
+    }
+  },
+  recordSuccess() { this.failures = 0; this.pausedUntil = 0; },
+};
+
+function isAiReviewEodPass() {
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' }));
+  const day = now.getDay();
+  if (day === 0 || day === 6) return false;
+  const h = now.getHours(), m = now.getMinutes();
+  return (h === 14 && m >= 45) || (h === 15 && m === 0);
+}
+
+function shouldTriggerAiReview(pos, currentPrice, avgVol20, curVol, vnindexChangePct) {
+  if (!currentPrice) return false;
+  const entry = parseFloat(pos.entry_price);
+  const sl    = parseFloat(pos.stop_loss);
+  if (!sl || !entry) return false;
+  const isLong = (pos.side || 'LONG') === 'LONG';
+  const slGap  = isLong ? (entry - sl) : (sl - entry);
+  if (slGap <= 0) return false;
+  const distToSL = isLong
+    ? ((currentPrice - sl) / slGap) * 100
+    : ((sl - currentPrice) / slGap) * 100;
+  const pnlPct = isLong
+    ? ((currentPrice - entry) / entry) * 100
+    : ((entry - currentPrice) / entry) * 100;
+  if (distToSL < 30 && distToSL >= 0) return { trigger: 'SL_CLOSE',     distToSL };
+  if (pnlPct  < -3)                   return { trigger: 'PNL_DOWN',     pnlPct };
+  if (avgVol20 > 0 && curVol > 1.5 * avgVol20) return { trigger: 'VOL_SPIKE', curVol, avgVol20 };
+  if (Math.abs(vnindexChangePct) >= 1.5)       return { trigger: 'VNINDEX_MOVE', vnindexChangePct };
+  return false;
+}
+
+async function runAiPositionReview() {
+  if (!process.env.GEMINI_API_KEY) {
+    console.warn('[AI Review] GEMINI_API_KEY chưa cấu hình, skip cycle');
+    return;
+  }
+  if (geminiCircuitBreaker.isOpen()) {
+    console.warn('[AI Review] Circuit breaker open, skipping cycle');
+    return;
+  }
+
+  const eodPass     = isAiReviewEodPass();
+  const workerRunId = uuidv4().slice(0, 8);
+
+  // 1. Query OPEN positions: PAPER luôn include; REAL chỉ khi user opt-in (phase 07)
+  const openResult = await query(
+    `SELECT p.id, p.portfolio_id, p.symbol, p.exchange, p.entry_price,
+            p.stop_loss, p.take_profit, p.quantity, p.side, p.status,
+            p.stop_type, p.trailing_current_stop, p.context
+     FROM financial.positions p
+     JOIN financial.portfolios pf ON pf.id = p.portfolio_id
+     JOIN financial.users u ON u.id = pf.user_id
+     WHERE p.status = 'OPEN' AND p.stop_loss IS NOT NULL
+       AND (
+         p.context = 'PAPER'
+         OR (p.context = 'REAL' AND u.settings->>'enable_proactive_real_review' = 'true')
+       )`,
+  );
+  const allPositions = openResult.rows;
+  if (allPositions.length === 0) return;
+
+  // 2. Fetch latest candle cho từng symbol
+  const symbols     = [...new Set(allPositions.map(p => p.symbol))];
+  const candlesMap  = {};
+  const avgVolMap   = {};
+  await Promise.all(symbols.map(async (sym) => {
+    const pos    = allPositions.find(p => p.symbol === sym);
+    const candle = await getLatestCandle(sym, pos?.exchange || 'HOSE');
+    if (candle?.close) {
+      candlesMap[sym] = candle;
+      // Proxy: dùng volume hiện tại làm baseline khi không có avg_20d.
+      // Lần đầu cycle sẽ không trigger VOL_SPIKE (tự so chính mình); cycle sau sẽ so vs candle trước.
+      avgVolMap[sym] = candle.volume || 0;
+    }
+  }));
+
+  // 3. VNINDEX intraday change (best-effort)
+  let vnindexChangePct = 0;
+  try {
+    const idxCandle = await getLatestCandle('VNINDEX', 'HOSE');
+    if (idxCandle?.close && idxCandle?.open) {
+      vnindexChangePct = ((idxCandle.close - idxCandle.open) / idxCandle.open) * 100;
+    }
+  } catch (_) { /* swallow */ }
+
+  // 4. Filter positions có trigger (hoặc eodPass)
+  const filtered = allPositions.filter(pos => {
+    const candle = candlesMap[pos.symbol];
+    if (!candle) return false;
+    if (eodPass) return true;
+    const t = shouldTriggerAiReview(
+      pos, candle.close, avgVolMap[pos.symbol], candle.volume || 0, vnindexChangePct,
+    );
+    return !!t;
+  });
+  if (filtered.length === 0) {
+    console.log(`[AI Review] No triggered positions (eodPass=${eodPass}, paper_open=${allPositions.length})`);
+    return;
+  }
+
+  // 5. Group by portfolio_id
+  const byPortfolio = {};
+  for (const p of filtered) {
+    if (!byPortfolio[p.portfolio_id]) byPortfolio[p.portfolio_id] = [];
+    byPortfolio[p.portfolio_id].push(p);
+  }
+  console.log(`[AI Review] Reviewing ${filtered.length} positions across ${Object.keys(byPortfolio).length} portfolios (eodPass=${eodPass}, runId=${workerRunId})`);
+
+  // 6. Per-portfolio: gọi Gemini, persist batch, notify each rec
+  const { reviewOpenPositions } = await import('../services/aiService.js');
+  const { broadcastPortfolioUpdate } = await import('../services/websocket.js');
+
+  const portfolios = Object.entries(byPortfolio);
+  const CONCURRENCY = 3;
+
+  for (let i = 0; i < portfolios.length; i += CONCURRENCY) {
+    const batch = portfolios.slice(i, i + CONCURRENCY);
+    await Promise.all(batch.map(async ([portfolioId, positions]) => {
+      const userId = await getUserIdByPortfolio(portfolioId);
+      if (!userId) return;
+
+      const currentPrices = {};
+      positions.forEach(p => {
+        const c = candlesMap[p.symbol];
+        if (c?.close) currentPrices[p.symbol] = c.close;
+      });
+
+      // Phase 07: build dismissal feedback header từ 7 ngày qua
+      let extraContextHeader = '';
+      try {
+        const dismissResult = await query(
+          `SELECT recommendations, dismiss_count
+           FROM financial.ai_position_reviews
+           WHERE user_id = $1
+             AND created_at > NOW() - INTERVAL '7 days'
+             AND dismiss_count > 0`,
+          [userId],
+        );
+        const dismissStats = {};
+        for (const row of dismissResult.rows) {
+          const recs = Array.isArray(row.recommendations) ? row.recommendations : [];
+          for (const r of recs) {
+            if (!r?.symbol || !r?.action || r.action === 'HOLD') continue;
+            const key = `${r.symbol}|${r.action}`;
+            dismissStats[key] = (dismissStats[key] || 0) + row.dismiss_count;
+          }
+        }
+        const heavyDismissals = Object.entries(dismissStats)
+          .filter(([, cnt]) => cnt >= 2)
+          .map(([key, cnt]) => {
+            const [sym, act] = key.split('|');
+            return `- User đã từ chối ${act} cho ${sym} ${cnt} lần`;
+          });
+        if (heavyDismissals.length > 0) {
+          extraContextHeader =
+            `Lưu ý lịch sử quyết định 7 ngày qua:\n${heavyDismissals.join('\n')}\n` +
+            `Nếu vẫn đề xuất hành động tương tự, escalate urgency hoặc đổi góc nhìn.\n\n`;
+        }
+      } catch (dbErr) {
+        console.warn(`[AI Review] dismiss history query failed for ${userId}:`, dbErr.message);
+      }
+
+      let recommendations;
+      try {
+        recommendations = await reviewOpenPositions({ positions, currentPrices, userId, extraContextHeader });
+        geminiCircuitBreaker.recordSuccess();
+      } catch (err) {
+        geminiCircuitBreaker.recordFailure();
+        console.error(`[AI Review] reviewOpenPositions failed for portfolio ${portfolioId}:`, err.message);
+        return;
+      }
+
+      const actionable = (recommendations || []).filter(r => r && r.action && r.action !== 'HOLD');
+      if (actionable.length === 0) return;
+
+      // Persist batch vào ai_position_reviews để lấy review_id (cần cho markReviewApplied)
+      const highUrgencyCount = actionable.filter(r => r.urgency === 'HIGH').length;
+      const exitCount        = actionable.filter(r => r.action === 'EXIT').length;
+      const healthScore      = Math.max(0, 100 - (highUrgencyCount * 20) - (exitCount * 15));
+
+      let reviewId = null;
+      try {
+        const saveResult = await query(
+          `INSERT INTO financial.ai_position_reviews
+             (user_id, portfolio_id, positions_reviewed, portfolio_health_score, recommendations, current_prices)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING id`,
+          [
+            userId,
+            portfolioId,
+            positions.length,
+            healthScore,
+            JSON.stringify(recommendations),
+            JSON.stringify(currentPrices),
+          ],
+        );
+        reviewId = saveResult.rows[0]?.id;
+      } catch (dbErr) {
+        console.warn(`[AI Review] Không lưu được lịch sử (portfolio ${portfolioId}):`, dbErr.message);
+      }
+
+      // 7. Mỗi actionable rec → dedupe + notify + broadcast
+      const severityMap = { LOW: 'INFO', MEDIUM: 'WARNING', HIGH: 'ERROR' };
+      const actionLabel = { TIGHTEN_SL: 'Siết Stop Loss', TAKE_PARTIAL: 'Chốt một phần', EXIT: 'Đóng vị thế' };
+
+      for (const rec of actionable) {
+        const dedupeKey = `${rec.position_id}:POSITION_REVIEW:${rec.action}`;
+        const last      = alertCache.get(dedupeKey);
+        if (last && Date.now() - last < AI_REVIEW_DEDUPE_TTL_MS) continue;
+        alertCache.set(dedupeKey, Date.now());
+
+        const titleAction     = actionLabel[rec.action] || rec.action;
+        const positionContext = positions.find(p => p.id === rec.position_id)?.context || 'PAPER';
+
+        try {
+          await createNotification({
+            userId,
+            type:     'AI_ALERT',
+            title:    `🤖 ${rec.symbol}: AI đề xuất ${titleAction}`,
+            message:  rec.reasoning || rec.key_concern || '',
+            severity: severityMap[rec.urgency] || 'INFO',
+            metadata: {
+              alert_type:        'POSITION_REVIEW',
+              position_id:       rec.position_id,
+              portfolio_id:      portfolioId,
+              symbol:            rec.symbol,
+              action:            rec.action,
+              new_stop_loss:     rec.new_stop_loss,
+              new_take_profit:   rec.new_take_profit,
+              urgency:           rec.urgency,
+              key_concern:       rec.key_concern,
+              recommendation_id: reviewId,
+              position_context:  positionContext,
+              worker_run_id:     workerRunId,
+            },
+          });
+        } catch (notifErr) {
+          console.error(`[AI Review] createNotification failed for ${rec.position_id}:`, notifErr.message);
+        }
+
+        try {
+          broadcastPortfolioUpdate(portfolioId, {
+            type:              'ai_position_review',
+            recommendation_id: reviewId,
+            position_id:       rec.position_id,
+            symbol:            rec.symbol,
+            action:            rec.action,
+            new_stop_loss:     rec.new_stop_loss,
+            new_take_profit:   rec.new_take_profit,
+            reasoning:         rec.reasoning,
+            urgency:           rec.urgency,
+            position_context:  positionContext,
+            generated_at:      new Date().toISOString(),
+          });
+        } catch (wsErr) {
+          console.error(`[AI Review] WS broadcast failed for ${rec.position_id}:`, wsErr.message);
+        }
+      }
+    }));
+  }
+
+  cleanupAlertCache();
+}
+
 // ─── startWorker — gọi từ index.js (DB đã kết nối) ───────────────────────────
 
 export function startWorker() {
   loadTrailingHWM().catch(err => console.error('[Worker] loadTrailingHWM error:', err.message));
 
-  console.log(`[Worker v2] Stop-Loss Monitor started. CHECK_CRON: ${CHECK_CRON}`);
+  console.log(`[Worker v2] Stop-Loss Monitor started. CHECK_CRON: ${CHECK_CRON}, ALERT_CRON: ${ALERT_CRON}, DYNAMIC_SL_CRON: ${DYNAMIC_SL_CRON}, AI_REVIEW_CRON: ${AI_REVIEW_CRON}`);
 
   cron.schedule(CHECK_CRON, async () => {
     if (!isMarketOpen()) return;
@@ -638,6 +922,14 @@ export function startWorker() {
       await recalculateDynamicSLJob();
     } catch (err) {
       console.error('[Worker] recalculateDynamicSLJob error:', err.message);
+    }
+  });
+
+  cron.schedule(AI_REVIEW_CRON, async () => {
+    try {
+      await runAiPositionReview();
+    } catch (err) {
+      console.error('[Worker] runAiPositionReview error:', err.message);
     }
   });
 }

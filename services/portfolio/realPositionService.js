@@ -149,6 +149,47 @@ class RealPositionService {
     );
     return result.rows;
   }
+
+  /**
+   * Lấy danh sách vị thế với filter status + pagination.
+   * @param {string} portfolioId
+   * @param {{ status?: string, page?: number, limit?: number }} options
+   */
+  static async listPositions(portfolioId, { status = null, page = 1, limit = 20 } = {}) {
+    const offset = (page - 1) * limit;
+    let whereClause = `portfolio_id = $1 AND context = 'REAL'`;
+    const countParams = [portfolioId];
+    const dataParams = [portfolioId];
+    let paramIdx = 2;
+
+    if (status) {
+      const statuses = status.includes(',') ? status.split(',').map(s => s.trim()) : [status];
+      whereClause += ` AND status = ANY($${paramIdx}::text[])`;
+      countParams.push(statuses);
+      dataParams.push(statuses);
+      paramIdx++;
+    }
+
+    const countResult = await query(
+      `SELECT COUNT(*) FROM financial.positions WHERE ${whereClause}`,
+      countParams
+    );
+    const total = parseInt(countResult.rows[0].count, 10);
+
+    dataParams.push(limit, offset);
+    const dataResult = await query(
+      `SELECT * FROM financial.positions WHERE ${whereClause} ORDER BY opened_at DESC LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
+      dataParams
+    );
+
+    return {
+      data: dataResult.rows,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
 }
 
 export default RealPositionService;

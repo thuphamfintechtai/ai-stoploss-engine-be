@@ -126,6 +126,7 @@ export const me = async (req, res, next) => {
         email: user.email,
         username: user.username,
         fullName: user.full_name,
+        settings: user.settings || {},
         createdAt: user.created_at
       }
     });
@@ -203,4 +204,30 @@ export const changePassword = async (req, res, next) => {
   }
 };
 
-export default { register, login, me, logout, updateProfile, changePassword, registerSchema, loginSchema, updateProfileSchema, changePasswordSchema };
+export const updateSettingsSchema = Joi.object({
+  enable_proactive_real_review: Joi.boolean().optional(),
+}).unknown(true);
+
+export const updateSettings = async (req, res, next) => {
+  try {
+    const patch = req.validatedBody || req.body;
+    if (!patch || Object.keys(patch).length === 0) {
+      return res.status(400).json({ success: false, message: 'Body trống' });
+    }
+    const DB = process.env.DB_SCHEMA || 'financial';
+    const { query } = await import('../config/database.js');
+    const result = await query(
+      `UPDATE ${DB}.users SET settings = settings || $1::jsonb, updated_at = NOW()
+       WHERE id = $2 RETURNING settings`,
+      [JSON.stringify(patch), req.user.userId],
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ success: false, message: 'User không tồn tại' });
+    }
+    res.json({ success: true, data: { settings: result.rows[0].settings } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export default { register, login, me, logout, updateProfile, changePassword, updateSettings, registerSchema, loginSchema, updateProfileSchema, changePasswordSchema, updateSettingsSchema };

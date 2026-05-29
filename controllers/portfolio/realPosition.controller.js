@@ -73,16 +73,38 @@ async function ensurePortfolioOwnership(req, res) {
 // ─── Controllers ─────────────────────────────────────────────────────────────
 
 /**
- * Lấy danh sách vị thế đang mở (context='REAL', status='OPEN').
- * GET /api/portfolios/:portfolioId/real-positions
+ * Lấy danh sách vị thế với filter status + pagination.
+ * GET /api/portfolios/:portfolioId/real-positions?status=OPEN&page=1&limit=20
+ * Nếu không truyền status → trả tất cả. Backward-compatible: không truyền params = OPEN only.
  */
 export const getOpenPositions = async (req, res, next) => {
   try {
     const portfolio = await ensurePortfolioOwnership(req, res);
     if (!portfolio) return;
 
-    const positions = await RealPositionService.getOpenPositions(portfolio.id);
+    const { status, page, limit } = req.query;
 
+    // Nếu có query params → dùng listPositions (pagination + status filter)
+    if (status || page || limit) {
+      const result = await RealPositionService.listPositions(portfolio.id, {
+        status: status || null,
+        page: parseInt(page, 10) || 1,
+        limit: parseInt(limit, 10) || 20,
+      });
+      return res.json({
+        success: true,
+        data: result.data,
+        pagination: {
+          total: result.total,
+          page: result.page,
+          limit: result.limit,
+          totalPages: result.totalPages,
+        },
+      });
+    }
+
+    // Default: chỉ OPEN positions (backward-compatible)
+    const positions = await RealPositionService.getOpenPositions(portfolio.id);
     return res.json({
       success: true,
       data: positions,
