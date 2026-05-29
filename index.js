@@ -9,6 +9,7 @@ import { initializeWebSocket } from './services/websocket.js';
 import { startPriceAlertMonitor } from './services/priceAlertMonitor.js';
 import { startWorker } from './workers/stopLossMonitor.js';
 import { startSettlementWorker } from './workers/settlementWorker.js';
+import { startAiMonitorWorker } from './workers/aiMonitorWorker.js';
 
 dotenv.config();
 
@@ -82,6 +83,9 @@ async function startServer() {
 
     console.log('💰 Starting Settlement Worker...');
     startSettlementWorker();
+
+    console.log('🤖 Starting AI Monitor Worker...');
+    startAiMonitorWorker();
 
     httpServer.listen(PORT, () => {
       console.log('='.repeat(60));
