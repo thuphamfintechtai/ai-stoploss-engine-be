@@ -3,8 +3,8 @@ import { query } from '../config/database.js';
 class Portfolio {
   static async create({ userId, name, totalBalance, maxRiskPercent, expectedReturnPercent }) {
     const result = await query(
-      `INSERT INTO portfolios (user_id, name, total_balance, max_risk_percent, expected_return_percent)
-       VALUES ($1, $2, $3, $4, COALESCE($5, 0))
+      `INSERT INTO portfolios (user_id, name, total_balance, max_risk_percent, expected_return_percent, available_cash)
+       VALUES ($1, $2, $3, $4, COALESCE($5, 0), $3)
        RETURNING *`,
       [userId, name, totalBalance, maxRiskPercent, expectedReturnPercent ?? 0]
     );
