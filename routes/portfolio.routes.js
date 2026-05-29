@@ -5,6 +5,7 @@ import { authenticateToken } from '../middleware/auth.js';
 import * as realOrderController from '../controllers/portfolio/realOrder.controller.js';
 import * as realPositionController from '../controllers/portfolio/realPosition.controller.js';
 import * as portfolioSummaryController from '../controllers/portfolio/portfolioSummary.controller.js';
+import * as aiMonitorController from '../controllers/portfolio/aiMonitor.controller.js';
 
 const router = express.Router();
 
@@ -47,5 +48,15 @@ router.post('/:portfolioId/real-positions/:positionId/close',
 // ─── Portfolio Summary ────────────────────────────────────────────────────────
 // Tổng quan portfolio: tổng giá trị, P&L, % return
 router.get('/:portfolioId/real-summary', portfolioSummaryController.getPortfolioSummary);
+
+// ─── AI Monitor ───────────────────────────────────────────────────────────────
+// Quản lý trạng thái giám sát AI
+router.get('/:portfolioId/monitor/state', aiMonitorController.getMonitorState);
+router.post('/:portfolioId/monitor/toggle',
+  validate(aiMonitorController.toggleMonitorSchema),
+  aiMonitorController.toggleMonitor);
+router.get('/:portfolioId/alerts', aiMonitorController.getAlerts);
+router.post('/:portfolioId/alerts/:alertId/ack', aiMonitorController.ackAlert);
+router.post('/:portfolioId/alerts/:alertId/dismiss', aiMonitorController.dismissAlert);
 
 export default router;
