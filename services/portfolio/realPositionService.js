@@ -68,7 +68,7 @@ class RealPositionService {
       const qtyInt = Math.round(Number(position.quantity));
       const pnl = calculateFees(entryVndInt, sellVndInt, qtyInt, portfolio);
 
-      // 3. Tạo sell order record
+      // 3. Tạo sell order record (dùng sellVndInt đã round — MAP-05 integer VND)
       const sellOrderRes = await client.query(
         `INSERT INTO financial.orders (
           portfolio_id, symbol, exchange, side, order_type,
@@ -81,8 +81,8 @@ class RealPositionService {
           portfolioId,
           position.symbol,
           position.exchange,
-          sellPrice,
-          position.quantity,
+          sellVndInt,
+          qtyInt,
           sellDate,
           notes,
         ]
