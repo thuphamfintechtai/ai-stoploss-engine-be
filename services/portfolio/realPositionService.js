@@ -69,13 +69,14 @@ class RealPositionService {
       const pnl = calculateFees(entryVndInt, sellVndInt, qtyInt, portfolio);
 
       // 3. Tạo sell order record (dùng sellVndInt đã round — MAP-05 integer VND)
+      // simulation_mode='INSTANT' vì constraint chỉ chấp nhận INSTANT|REALISTIC
       const sellOrderRes = await client.query(
         `INSERT INTO financial.orders (
           portfolio_id, symbol, exchange, side, order_type,
           limit_price, quantity, simulation_mode,
           context, status, manual_entry, actual_filled_at, notes,
           placed_at
-        ) VALUES ($1, $2, $3, 'SELL', 'MANUAL_RECORD', $4, $5, 'MANUAL', 'REAL', 'RECORDED', true, $6, $7, NOW())
+        ) VALUES ($1, $2, $3, 'SELL', 'MANUAL_RECORD', $4, $5, 'INSTANT', 'REAL', 'RECORDED', true, $6, $7, NOW())
         RETURNING *`,
         [
           portfolioId,
