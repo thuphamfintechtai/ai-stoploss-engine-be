@@ -80,6 +80,9 @@ export const createRealOrderSchema = Joi.object({
   notes:       Joi.string().max(500).optional().allow('', null),
   // D-05 (MAP-01): order_status ∈ {FILLED, PENDING}, default FILLED (backward-compat)
   order_status: Joi.string().valid('FILLED', 'PENDING').default('FILLED'),
+  // Stop Loss / Take Profit (optional - VND)
+  stop_loss:   Joi.number().positive().optional().allow(null),
+  take_profit: Joi.number().positive().optional().allow(null),
   // NOTE: reference_price KHÔNG accept từ client (policy F0 — không trust client-provided).
   // Server lookup qua marketPriceService.getMarketData ở handler body.
 });
@@ -129,6 +132,8 @@ export const createRealOrder = async (req, res, next) => {
       filled_date,
       notes,
       order_status,
+      stop_loss,
+      take_profit,
     } = req.validatedBody;
 
     // ─── Server-side band validation ────────────────────────────────────────
@@ -161,6 +166,8 @@ export const createRealOrder = async (req, res, next) => {
         filledDate: filled_date,
         notes,
         orderStatus: order_status,
+        stopLoss: stop_loss || null,
+        takeProfit: take_profit || null,
       });
     } else {
       // SELL side sẽ delegate sang RealPositionService.closePosition (qua realPosition.controller)

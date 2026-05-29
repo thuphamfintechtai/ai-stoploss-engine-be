@@ -62,6 +62,8 @@ class RealOrderService {
     filledDate,
     notes = null,
     orderStatus = 'FILLED',
+    stopLoss = null,
+    takeProfit = null,
   }) {
     if (orderStatus !== 'FILLED' && orderStatus !== 'PENDING') {
       const err = new Error('orderStatus phai la FILLED hoac PENDING');
@@ -108,15 +110,20 @@ class RealOrderService {
     // Position CHI tao khi FILLED — PENDING chua co position (tao khi confirmOrderFill)
     let position = null;
     if (orderStatus === 'FILLED') {
+      // Calculate risk if stopLoss is provided
+      let riskValueVnd = 0;
+      if (stopLoss && stopLoss > 0 && filledPrice > stopLoss) {
+        riskValueVnd = Math.round((filledPrice - stopLoss) * quantity);
+      }
       position = await Position.create({
         portfolioId,
         symbol,
         exchange,
         entryPrice: filledPrice,
-        stopLoss: null,      // REAL positions không bắt buộc có SL (per migration 007)
-        takeProfit: null,
+        stopLoss: stopLoss || null,
+        takeProfit: takeProfit || null,
         quantity,
-        riskValueVnd: 0,     // Risk được tính sau khi user set SL
+        riskValueVnd,
         side: 'LONG',
         context: 'REAL',
         buyFeeVnd,
